@@ -1,1 +1,3 @@
-# Senior-Project
+# senior_project
+
+A new Flutter project.
