@@ -12,6 +12,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
   String errorMessage = '';
+  bool _isPasswordVisible = false;
 
   void login() {
     String email = emailController.text.trim();
@@ -60,13 +61,23 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             SizedBox(height: 20),
             TextField(
-              controller: passwordController,
-              decoration: InputDecoration(
-                labelText: 'Password',
-                border: OutlineInputBorder(),
-              ),
-              obscureText: true,
-            ),
+  controller: passwordController,
+  decoration: InputDecoration(
+    labelText: 'Password',
+    border: OutlineInputBorder(),
+    suffixIcon: IconButton(
+      icon: Icon(
+        _isPasswordVisible ? Icons.visibility : Icons.visibility_off,
+      ),
+      onPressed: () {
+        setState(() {
+          _isPasswordVisible = !_isPasswordVisible;
+        });
+      },
+    ),
+  ),
+  obscureText: !_isPasswordVisible,
+),
             SizedBox(height: 10),
             if (errorMessage.isNotEmpty)
               Text(
