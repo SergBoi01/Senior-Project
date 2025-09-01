@@ -43,6 +43,17 @@ class MainPage extends StatelessWidget {
                 Navigator.push(context, MaterialPageRoute(builder: (context) => const SymbolsScreen()));
               },
             ),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.logout),
+              title: const Text('Logout'),
+              onTap: () {
+                // Close the drawer
+                Navigator.pop(context);
+                // Navigate back to login screen
+                Navigator.pushReplacementNamed(context, '/');
+              },
+            ),
           ],
         ),
       ),
