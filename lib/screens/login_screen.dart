@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:senior_project/screens/main_page.dart';
+import 'package:senior_project/screens/registration_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -14,33 +16,33 @@ class _LoginScreenState extends State<LoginScreen> {
   String errorMessage = '';
   bool _isPasswordVisible = false;
 
-  void login() {
-    String email = emailController.text.trim();
-    String password = passwordController.text;
+  void login() async {
+  String email = emailController.text.trim();
+  String password = passwordController.text;
 
-    // Simple validation
-    if (email.isEmpty || password.isEmpty) {
-      setState(() {
-        errorMessage = 'Please enter both email and password';
-      });
-      return;
-    }
-
-    // Test credentials
-    if (email == 'test@test.com' && password == 'password123') {
-      // Login successful
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const MainPage()),
-      );
-    } else {
-      // Login failed
-      setState(() {
-        errorMessage = 'Invalid email or password';
-      });
-    }
+  if (email.isEmpty || password.isEmpty) {
+    setState(() {
+      errorMessage = 'Please enter both email and password';
+    });
+    return;
   }
 
+  try {
+    await FirebaseAuth.instance.signInWithEmailAndPassword(
+      email: email,
+      password: password,
+    );
+    
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const MainPage()),
+    );
+  } catch (e) {
+    setState(() {
+      errorMessage = 'Invalid email or password';
+    });
+  }
+}
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -89,6 +91,16 @@ class _LoginScreenState extends State<LoginScreen> {
               onPressed: login,
               child: const Text('Login'),
             ),
+            SizedBox(height: 10),
+TextButton(
+  onPressed: () {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => RegistrationScreen()),
+    );
+  },
+  child: Text('Don\'t have an account? Create one'),
+),
           ],
         ),
       ),
