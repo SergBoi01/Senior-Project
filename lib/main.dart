@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:senior_project/screens/splash_screen.dart';
-import 'package:senior_project/screens/registration_screen.dart';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
