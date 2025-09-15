@@ -10,6 +10,9 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   final TextEditingController _emailController = TextEditingController();
 final TextEditingController _passwordController = TextEditingController();
 final TextEditingController _confirmPasswordController = TextEditingController();
+  bool _isPasswordVisible = false;
+  bool _isConfirmPasswordVisible = false;
+
 void _register() async {
   // Check if passwords match
   if (_passwordController.text != _confirmPasswordController.text) {
@@ -62,8 +65,18 @@ void _register() async {
         decoration: InputDecoration(
           labelText: 'Password',
           border: OutlineInputBorder(),
+          suffixIcon: IconButton(
+            icon: Icon(
+              _isPasswordVisible ? Icons.visibility : Icons.visibility_off,
+            ),
+            onPressed: () {
+              setState(() {
+                _isPasswordVisible = !_isPasswordVisible;
+              });
+            },
+          ),
         ),
-        obscureText: true,
+        obscureText: !_isPasswordVisible,
       ),
       SizedBox(height: 16),
       TextField(
@@ -71,8 +84,18 @@ void _register() async {
       decoration: InputDecoration(
         labelText: 'Confirm Password',
         border: OutlineInputBorder(),
+        suffixIcon: IconButton(
+          icon: Icon(
+            _isConfirmPasswordVisible ? Icons.visibility : Icons.visibility_off,
+          ),
+          onPressed: () {
+            setState(() {
+              _isConfirmPasswordVisible = !_isConfirmPasswordVisible;
+            });
+          },
+        ),
       ),
-      obscureText: true,
+      obscureText: !_isConfirmPasswordVisible,
   ),
       SizedBox(height: 24),
 ElevatedButton(
