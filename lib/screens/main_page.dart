@@ -22,7 +22,32 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   final GlobalKey _repaintKey = GlobalKey();
 
   // Store all saved drawings here
-  List<List<List<double>>> savedDrawings = [];
+  List<Uint8List> savedImages = [];
+
+  Future<void> _saveDrawing() async {
+    try {
+      RenderRepaintBoundary boundary =
+          _repaintKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+
+      // Capture canvas as image
+      ui.Image image = await boundary.toImage(pixelRatio: 1.0);
+
+      // Convert to PNG bytes for storage
+      ByteData? byteData =
+          await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) return;
+
+      Uint8List pngBytes = byteData.buffer.asUint8List();
+
+      setState(() {
+        savedImages.add(pngBytes);
+      });
+
+      debugPrint("Saved image #${savedImages.length}");
+    } catch (e) {
+      debugPrint("Error saving drawing: $e");
+    }
+  }
 
   @override
   void initState() {
@@ -37,71 +62,6 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   void dispose() {
     _animationController.dispose();
     super.dispose();
-  }
-
-  Future<void> _saveDrawing() async {
-    try {
-      RenderRepaintBoundary boundary =
-          _repaintKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
-      ui.Image image = await boundary.toImage(pixelRatio: 1.0);
-
-      ByteData? byteData =
-          await image.toByteData(format: ui.ImageByteFormat.rawRgba);
-      if (byteData == null) return;
-
-      Uint8List data = byteData.buffer.asUint8List();
-      int width = image.width;
-      int height = image.height;
-
-      // Convert to grayscale
-      List<List<int>> grayscale = List.generate(
-        height,
-        (_) => List.filled(width, 0),
-      );
-
-      for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-          int byteOffset = (y * width + x) * 4;
-          int r = data[byteOffset];
-          int g = data[byteOffset + 1];
-          int b = data[byteOffset + 2];
-          int a = data[byteOffset + 3];
-
-          int gray = ((0.3 * r + 0.59 * g + 0.11 * b) * (a / 255)).round();
-          grayscale[y][x] = gray;
-        }
-      }
-
-      // Resize to 28x28
-      List<List<int>> resized = List.generate(
-        28,
-        (_) => List.filled(28, 0),
-      );
-
-      double xRatio = width / 28.0;
-      double yRatio = height / 28.0;
-
-      for (int y = 0; y < 28; y++) {
-        for (int x = 0; x < 28; x++) {
-          int nearestX = (x * xRatio).floor();
-          int nearestY = (y * yRatio).floor();
-          resized[y][x] = grayscale[nearestY][nearestX];
-        }
-      }
-
-      // Normalize to [0,1]
-      List<List<double>> normalized = resized
-          .map((row) => row.map((val) => val / 255.0).toList())
-          .toList();
-
-      setState(() {
-        savedDrawings.add(normalized);
-      });
-
-      debugPrint("✅ Saved drawing #${savedDrawings.length}");
-    } catch (e) {
-      debugPrint("❌ Error saving drawing: $e");
-    }
   }
 
   void _toggleMenu() {
@@ -221,39 +181,58 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                 elevation: 4,
                 child: Column(
                   children: [
-                    // Toolbar (Undo + Clear + Save)
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Row(
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.undo),
-                            onPressed: () => _notifier.undo(),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.clear),
-                            onPressed: () => _notifier.clear(),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.save),
-                            onPressed: _saveDrawing,
-                          ),
-                        ],
-                      ),
+                  // Toolbar (Undo + Clear + Save)
+                  Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.undo),
+                          onPressed: () => _notifier.undo(),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: () => _notifier.clear(),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.save),
+                          onPressed: _saveDrawing,
+                        ),
+                      ],
                     ),
-                    // Drawing Area (wrapped in RepaintBoundary so we can capture it)
-                    Expanded(
+                  ),
+                  // Drawing Area
+                  Expanded(
+                    child: RepaintBoundary(
+                      key: _repaintKey,
                       child: Container(
                         color: Colors.white,
-                        child: RepaintBoundary(
-                          key: _repaintKey,
-                          child: Scribble(
-                            notifier: _notifier,
-                          ),
+                        child: Scribble(
+                          notifier: _notifier,
                         ),
                       ),
                     ),
-                  ],
+                  ),
+                  // Thumbnails of saved drawings
+                  SizedBox(
+                    height: 100,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: savedImages.length,
+                      itemBuilder: (context, index) {
+                        return Padding(
+                          padding: const EdgeInsets.all(4.0),
+                          child: Image.memory(
+                            savedImages[index],
+                            width: 80,
+                            height: 80,
+                            fit: BoxFit.contain,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
                 ),
               ),
             ),
