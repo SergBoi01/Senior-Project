@@ -16,6 +16,7 @@ class MainPage extends StatefulWidget {
 }
 
 class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin {
+  
   late AnimationController _animationController;
   bool isMenuOpen = false;
   final ScribbleNotifier _notifier = ScribbleNotifier();
@@ -64,6 +65,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     super.dispose();
   }
 
+  
   void _toggleMenu() {
     if (isMenuOpen) {
       _animationController.reverse();
