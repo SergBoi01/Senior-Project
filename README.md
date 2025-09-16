@@ -1,3 +1,10 @@
+## DO NOT DELETE
+
+## This is main with the saved images showing in the screen
+
+This branch was made to show how to output saved images.
+This will be used later for outputting imaged in glossary page
+
 # Interpreter Assistance App
 
 A Flutter application designed to assist interpreters by translating written or typed symbols and text into a transcript. The application will use a customizable glossary and symbol set to provide accurate and real-time translations.
