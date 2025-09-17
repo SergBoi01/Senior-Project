@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:senior_project/screens/main_page.dart';
 import 'package:senior_project/screens/splash_screen.dart';
 
 import 'package:firebase_core/firebase_core.dart';
@@ -19,7 +20,10 @@ class MainApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: SplashScreen(),
+
+      // SWITCHED TO MAIN PAGE CAUSE IM TOO LAZY
+      // TO INPUT MY USERNAE EVERYTIME
+      home: MainPage(),
     );
   }
 }
