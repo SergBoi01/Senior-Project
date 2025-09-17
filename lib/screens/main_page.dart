@@ -29,9 +29,54 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   // Store all saved drawings here
   List<Uint8List> savedImages = [];
 
-  /////// MODEL TRY OUT STUFF
-  ///
-  ///////
+  /////// MODEL TRY OUT STUFF /////////////////////////////
+  // Stores the predictions for each saved drawing
+  List<int> predictions = [];
+
+  // Interpreter reference
+  late Interpreter _interpreter;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadModel();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+  }
+
+  Future<void> _loadModel() async {
+    try {
+      _interpreter = await Interpreter.fromAsset('assets/models/mnist.tflite');
+      debugPrint("MNIST model loaded!");
+    } catch (e) {
+      debugPrint("Error loading model: $e");
+    }
+  }
+
+  Future<void> _runModel(List<List<double>> normalized) async {
+    // 1. Prepare input as 1x28x28x1 tensor
+    var input = List.generate(1, (_) => 
+        List.generate(28, (y) => 
+          List.generate(28, (x) => [normalized[y][x]])));
+
+    // 2. Prepare output as 1x10 (digits 0–9)
+    var output = List.generate(1, (_) => List.filled(10, 0.0));
+
+    // 3. Run inference
+    _interpreter.run(input, output);
+
+    // 4. Find predicted digit
+    int prediction = output[0].indexOf(output[0].reduce((a, b) => a > b ? a : b));
+
+    debugPrint("Predicted digit: $prediction");
+
+    setState(() {
+      predictions.add(prediction); // store alongside savedImages
+    });
+  }
+  //////////////////////////////////////////////////////
 
   Future<void> _saveDrawing() async {
     try {
@@ -56,15 +101,6 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     } catch (e) {
       debugPrint("Error saving drawing: $e");
     }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    );
   }
 
   @override
@@ -223,25 +259,6 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                       ),
                     ),
                   ),
-                  // Thumbnails of saved drawings
-                  SizedBox(
-                    height: 100,
-                    child: ListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: savedImages.length,
-                      itemBuilder: (context, index) {
-                        return Padding(
-                          padding: const EdgeInsets.all(4.0),
-                          child: Image.memory(
-                            savedImages[index],
-                            width: 80,
-                            height: 80,
-                            fit: BoxFit.contain,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
                 ],
                 ),
               ),
@@ -250,12 +267,41 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
             Expanded(
               child: Material(
                 elevation: 4,
-                child: Container(
-                  color: Colors.white,
-                  child: const Center(
-                    child: Text('Transcription Area'),
+                child: Expanded(
+                  child: Material(
+                    elevation: 4,
+                    child: Container(
+                      color: Colors.white,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.all(8.0),
+                            child: Text(
+                              "Model Predictions",
+                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          Expanded(
+                            child: ListView.builder(
+                              itemCount: savedImages.length,
+                              itemBuilder: (context, index) {
+                                return ListTile(
+                                  leading: Image.memory(
+                                    savedImages[index], // thumbnail bytes
+                                    width: 40,
+                                    height: 40,
+                                  ),
+                                  title: Text("Prediction: ${predictions[index]}"),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
+                )
               ),
             ),
           ],
