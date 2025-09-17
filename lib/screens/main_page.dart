@@ -8,6 +8,10 @@ import 'package:flutter/rendering.dart';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+/////// MODEL TRY OUT STUFF
+import 'package:tflite_flutter/tflite_flutter.dart';
+///////
+
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
 
@@ -24,6 +28,10 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
 
   // Store all saved drawings here
   List<Uint8List> savedImages = [];
+
+  /////// MODEL TRY OUT STUFF
+  ///
+  ///////
 
   Future<void> _saveDrawing() async {
     try {
