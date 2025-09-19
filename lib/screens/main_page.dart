@@ -1,22 +1,65 @@
-import 'package:flutter/material.dart';
 import 'package:senior_project/screens/glossary_screen.dart';
 import 'package:senior_project/screens/login_screen.dart';
 import 'package:senior_project/screens/symbols_screen.dart';
 
+import 'package:flutter/material.dart';
 import 'package:scribble/scribble.dart';
 import 'package:flutter/rendering.dart';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
-
-/////// MODEL TRY OUT STUFF
 import 'package:tflite_flutter/tflite_flutter.dart';
-///////
 
-class MainPage extends StatefulWidget {
-  const MainPage({super.key});
+class InputPreview extends StatelessWidget {
+  final List<List<double>> grid;
+
+  const InputPreview({super.key, required this.grid});
 
   @override
-  State<MainPage> createState() => _MainPageState();
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 140, // scale it up for visibility
+      height: 140,
+      child: GridView.builder(
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 28,
+        ),
+        itemCount: 28 * 28,
+        itemBuilder: (context, index) {
+          final y = index ~/ 28;
+          final x = index % 28;
+          final v = grid[y][x];
+          return Container(
+            color: Color.lerp(
+              Colors.white,
+              Colors.black,
+              v, // 0 → white, 1 → black
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class SymbolData {
+  final Uint8List thumbnail;   // what user drew
+  final int? prediction;       // model’s result
+  final Uint8List processed;   // what the model actually sees (28x28)
+
+  SymbolData({
+    required this.thumbnail,
+    required this.processed,
+    this.prediction,
+  });
+
+  SymbolData copyWith({int? prediction}) {
+    return SymbolData(
+      thumbnail: thumbnail,
+      processed: processed,
+      prediction: prediction ?? this.prediction,
+    );
+  }
 }
 
 class PredictionResult {
@@ -26,25 +69,26 @@ class PredictionResult {
   PredictionResult({required this.imageBytes, this.prediction});
 }
 
+class MainPage extends StatefulWidget {
+  const MainPage({super.key});
+
+  @override
+  State<MainPage> createState() => _MainPageState();
+}
 
 class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin {
   
   late AnimationController _animationController;
   bool isMenuOpen = false;
   final ScribbleNotifier _notifier = ScribbleNotifier();
-  
   final GlobalKey _repaintKey = GlobalKey();
-  
-
   // Store all saved drawings here
-  List<Uint8List> savedImages = [];
-
-  /////// MODEL TRY OUT STUFF /////////////////////////////
+  List<SymbolData> savedSymbols = [];
   // Stores the predictions for each saved drawing
   List<PredictionResult> results = [];
-
   // Interpreter reference
   late Interpreter _interpreter;
+  List<List<double>>? lastInputGrid;
 
   @override
   void initState() {
@@ -54,7 +98,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
       vsync: this,
       duration: const Duration(milliseconds: 300),
     );
-    _notifier.setStrokeWidth(10); // make the pen thicker
+    _notifier.setStrokeWidth(20); // make the pen thicker
     _notifier.setColor(Colors.black); // default color
   }
 
@@ -67,121 +111,66 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     }
   }
 
-  Future<void> _runModel(List<List<double>> normalized, int index) async {
-    var input = List.generate(1, (_) =>
-        List.generate(28, (y) =>
-          List.generate(28, (x) => [normalized[y][x].toDouble()])));
+  Future<void> _saveDrawings() async {
+    try {
+      RenderRepaintBoundary boundary =
+          _repaintKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+      ui.Image image = await boundary.toImage(pixelRatio: 1.0);
 
-    var output = List.generate(1, (_) => List.filled(10, 0.0));
+      ByteData? byteData =
+          await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) return;
+      Uint8List pngBytes = byteData.buffer.asUint8List();
 
-    // TESTING MODEL INPUT
-    for (int y = 0; y < 28; y++) {
-      debugPrint(input[0][y].map((e) => e[0].toStringAsFixed(2)).join(" "));
+      // Preprocess
+      final normalized = await _preprocessImage(pngBytes);
+      final processedBytes = await _gridToImage(normalized);
+      final prediction = await _runModel(normalized);
+
+      setState(() {
+        savedSymbols.add(
+          SymbolData(
+            thumbnail: pngBytes,
+            processed: processedBytes,
+            prediction: prediction,
+          ),
+        );
+      });
+
+      debugPrint("Saved drawing #${savedSymbols.length}, prediction $prediction");
+    } catch (e) {
+      debugPrint("Error saving drawing: $e");
     }
-    /////////////////////////
-    
-    _interpreter.run(input, output);
-
-    int prediction = output[0].indexOf(
-      output[0].reduce((a, b) => a > b ? a : b),
-    );
-
-    debugPrint("Predicted digit: $prediction");
-
-    setState(() {
-      results[index] = PredictionResult(
-        imageBytes: results[index].imageBytes,
-        prediction: prediction,
-      );
-    });
   }
 
   Future<List<List<double>>> _preprocessImage(Uint8List bytes) async {
-  // 1. Decode full drawing to a large image
-  final codec = await ui.instantiateImageCodec(bytes);
+  // 1. Resize to 28x28
+  final codec =
+      await ui.instantiateImageCodec(bytes, targetWidth: 28, targetHeight: 28);
   final frame = await codec.getNextFrame();
   final image = frame.image;
 
-  // 2. Extract RGBA bytes
+  // 2. Convert to grayscale
   final byteData = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
   if (byteData == null) return List.generate(28, (_) => List.filled(28, 0.0));
+
   final data = byteData.buffer.asUint8List();
-
-  final w = image.width;
-  final h = image.height;
-
-  // 3. Compute bounding box of non-white pixels
-  int minX = w, minY = h, maxX = 0, maxY = 0;
-  for (int y = 0; y < h; y++) {
-    for (int x = 0; x < w; x++) {
-      final offset = (y * w + x) * 4;
-      final r = data[offset];
-      final g = data[offset + 1];
-      final b = data[offset + 2];
-      final a = data[offset + 3];
-      final gray = (0.3 * r + 0.59 * g + 0.11 * b) * (a / 255.0);
-
-      if (gray < 250) { // not pure white
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (x > maxX) maxX = x;
-        if (y > maxY) maxY = y;
-      }
-    }
-  }
-
-  // Handle empty drawings
-  if (minX > maxX || minY > maxY) {
-    return List.generate(28, (_) => List.filled(28, 0.0));
-  }
-
-  final cropW = maxX - minX + 1;
-  final cropH = maxY - minY + 1;
-
-  // 4. Crop + scale to fit inside 20x20 box (like MNIST preprocessing)
-  final scale = 20.0 / (cropW > cropH ? cropW : cropH);
-  final newW = (cropW * scale).round();
-  final newH = (cropH * scale).round();
-
-  final recorder = ui.PictureRecorder();
-  final canvas = Canvas(recorder);
-  canvas.drawColor(Colors.white, BlendMode.src);
-
-  final src = Rect.fromLTWH(minX.toDouble(), minY.toDouble(), cropW.toDouble(), cropH.toDouble());
-  final dst = Rect.fromLTWH(0, 0, newW.toDouble(), newH.toDouble());
-  canvas.drawImageRect(image, src, dst, Paint());
-
-  final cropped = await recorder.endRecording().toImage(newW, newH);
-
-  // 5. Paste into center of 28x28 canvas
-  final recorder2 = ui.PictureRecorder();
-  final canvas2 = Canvas(recorder2);
-  canvas2.drawColor(Colors.white, BlendMode.src);
-
-  final dx = ((28 - newW) / 2).floorToDouble();
-  final dy = ((28 - newH) / 2).floorToDouble();
-  canvas2.drawImage(cropped, Offset(dx, dy), Paint());
-
-  final finalImg = await recorder2.endRecording().toImage(28, 28);
-
-  // 6. Extract grayscale normalized pixels
-  final bd = await finalImg.toByteData(format: ui.ImageByteFormat.rawRgba);
-  if (bd == null) return List.generate(28, (_) => List.filled(28, 0.0));
-  final arr = bd.buffer.asUint8List();
-
-  final normalized = List.generate(
+  final List<List<double>> normalized = List.generate(
     28,
     (y) => List.generate(
       28,
       (x) {
-        final off = (y * 28 + x) * 4;
-        final r = arr[off];
-        final g = arr[off + 1];
-        final b = arr[off + 2];
-        final a = arr[off + 3];
-        
-        double gray = ((0.3 * r + 0.59 * g + 0.11 * b) * (a / 255.0)) / 255.0;
-        return gray - 1;
+        final offset = (y * 28 + x) * 4;
+        final r = data[offset];
+        final g = data[offset + 1];
+        final b = data[offset + 2];
+        final a = data[offset + 3];
+
+        // Grayscale with alpha applied
+        final gray = (0.3 * r + 0.59 * g + 0.11 * b) * (a / 255.0);
+
+        // Normalize to [0,1], invert so black=1, white=0
+        return (255.0 - gray) / 255.0;
       },
     ),
   );
@@ -189,42 +178,53 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   return normalized;
 }
 
+  Future<int> _runModel(List<List<double>> normalized) async {
+    // 1. Prepare input as 1x28x28x1 tensor
+    var input = List.generate(
+      1,
+      (_) => List.generate(
+        28,
+        (y) => List.generate(28, (x) => [normalized[y][x]]),
+      ),
+    );
 
+    // 2. Prepare output as 1x10
+    var output = List.generate(1, (_) => List.filled(10, 0.0));
 
-  //////////////////////////////////////////////////////
+    // 3. Run inference
+    _interpreter.run(input, output);
 
-  Future<void> _saveDrawings() async {
-    try {
-      // 1. Capture the Scribble widget as ainputn image
-      RenderRepaintBoundary boundary =
-          _repaintKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
-      ui.Image image = await boundary.toImage(pixelRatio: 1.0);
+    // 4. Find prediction
+    int prediction = output[0].indexOf(output[0].reduce((a, b) => a > b ? a : b));
 
-      // 2. Convert to bytes
-      ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      if (byteData == null) return;
-      Uint8List pngBytes = byteData.buffer.asUint8List();
-
-      // 3. Save the raw bytes for thumbnails
-      setState(() {
-        savedImages.add(pngBytes);
-        results.add(PredictionResult(imageBytes: pngBytes));
-      });
-
-      debugPrint("Saved drawing #${savedImages.length}");
-
-      // 4. Preprocess image for model
-      final normalized = await _preprocessImage(pngBytes);
-
-      // 5. Run model prediction
-      await _runModel(normalized, results.length - 1);
-
-    } catch (e) {
-      debugPrint("Error saving drawing: $e");
-    }
+    return prediction;
   }
 
-  @override
+  Future<Uint8List> _gridToImage(List<List<double>> grid) async {
+    const size = 28;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final paint = Paint();
+
+    // Black background
+    paint.color = Colors.black;
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.toDouble(), size.toDouble()), paint);
+
+    // Draw each pixel (white intensity = value in grid[y][x])
+    for (int y = 0; y < size; y++) {
+      for (int x = 0; x < size; x++) {
+        double v = grid[y][x];
+        paint.color = Color.fromARGB(255, (v * 255).toInt(), (v * 255).toInt(), (v * 255).toInt());
+        canvas.drawRect(Rect.fromLTWH(x.toDouble(), y.toDouble(), 1, 1), paint);
+      }
+    }
+
+    final picture = recorder.endRecording();
+    final img = await picture.toImage(size, size);
+    final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
+    return byteData!.buffer.asUint8List();
+  }
+  
   void dispose() {
     _animationController.dispose();
     super.dispose();
@@ -241,6 +241,14 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     setState(() {
       isMenuOpen = !isMenuOpen;
     });
+  }
+
+  void _clearCanvas() {
+    _notifier.clear();
+  }
+
+  void _undo() {
+    _notifier.undo();
   }
 
   @override
@@ -339,88 +347,69 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
         ),
       ),
       body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 15.0, vertical: 15.0),
-        child: Row(
+        padding: const EdgeInsets.all(8.0),
+        child: Column(
           children: [
             Expanded(
-              child: Material(
-                elevation: 4,
-                child: Column(
-                  children: [
-                  // Toolbar (Undo + Clear + Save)
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.undo),
-                          onPressed: () => _notifier.undo(),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.clear),
-                          onPressed: () => _notifier.clear(),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.save),
-                          onPressed: _saveDrawings,
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Drawing Area
+              child: Row(
+                children: [
+                  // LEFT: Canvas
                   Expanded(
                     child: RepaintBoundary(
                       key: _repaintKey,
                       child: Container(
                         color: Colors.white,
-                        child: Scribble(
-                          notifier: _notifier,
-                          drawPen: true,
-                          
-                        ),
+                        child: Scribble(notifier: _notifier),
                       ),
                     ),
                   ),
+
+                  const VerticalDivider(width: 1),
+
+                  // RIGHT: Predictions list
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: savedSymbols.length,
+                      itemBuilder: (context, index) {
+                        final symbol = savedSymbols[index];
+                        return Card(
+                          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                          child: Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: Row(
+                              children: [
+                                Column(
+                                  children: [
+                                    Image.memory(symbol.thumbnail, width: 40, height: 40),
+                                    const SizedBox(height: 4),
+                                    Image.memory(symbol.processed, width: 40, height: 40),
+                                  ],
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  symbol.prediction != null
+                                      ? "Prediction: ${symbol.prediction}"
+                                      : "Predicting...",
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
                 ],
-                ),
               ),
             ),
-            const VerticalDivider(width: 1, color: Colors.grey),
-            Expanded(
-              child: Material(
-                elevation: 4,
-                child: Container(
-                  color: Colors.white,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Padding(
-                        padding: EdgeInsets.all(8.0),
-                        child: Text(
-                          "Model Predictions",
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      Expanded(
-                        child: ListView.builder(
-                          itemCount: results.length,
-                          itemBuilder: (context, index) {
-                            final item = results[index];
-                            return ListTile(
-                              leading: Image.memory(item.imageBytes, width: 40, height: 40),
-                              title: Text(
-                                item.prediction != null
-                                    ? "Prediction: ${item.prediction}"
-                                    : "Predicting...",
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+
+            // Bottom controls
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                ElevatedButton(onPressed: _undo, child: const Text("Undo")),
+                ElevatedButton(onPressed: _clearCanvas, child: const Text("Clear")),
+                ElevatedButton(onPressed: _saveDrawings, child: const Text("Save Symbol")),
+              ],
             ),
           ],
         ),
