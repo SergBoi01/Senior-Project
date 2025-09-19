@@ -8,6 +8,7 @@ import 'package:flutter/rendering.dart';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:tflite_flutter/tflite_flutter.dart';
+import 'package:image/image.dart' as img;
 
 class InputPreview extends StatelessWidget {
   final List<List<double>> grid;
@@ -43,23 +44,15 @@ class InputPreview extends StatelessWidget {
 }
 
 class SymbolData {
-  final Uint8List thumbnail;   // what user drew
-  final int? prediction;       // model’s result
-  final Uint8List processed;   // what the model actually sees (28x28)
+  final Uint8List thumbnail;  // small preview
+  final Uint8List processed;  // 28x28 normalized image as bytes
+  int? prediction;
 
   SymbolData({
     required this.thumbnail,
     required this.processed,
     this.prediction,
   });
-
-  SymbolData copyWith({int? prediction}) {
-    return SymbolData(
-      thumbnail: thumbnail,
-      processed: processed,
-      prediction: prediction ?? this.prediction,
-    );
-  }
 }
 
 class PredictionResult {
@@ -111,92 +104,140 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     }
   }
 
-  Future<void> _saveDrawings() async {
+  img.Image _normalizedToImage(List<List<double>> normalized) {
+    img.Image image = img.Image(width: 28, height: 28);
+    for (int y = 0; y < 28; y++) {
+      for (int x = 0; x < 28; x++) {
+        int value = (normalized[y][x] * 255).toInt();
+        image.setPixelRgba( x, y, value, value, value, 255);
+      }
+    }
+    return image;
+  }
+
+  Future<void> _saveAndPredict() async {
     try {
+      // Capture canvas as image
       RenderRepaintBoundary boundary =
           _repaintKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
-      ui.Image image = await boundary.toImage(pixelRatio: 1.0);
-
+      ui.Image captured = await boundary.toImage(pixelRatio: 1.0);
       ByteData? byteData =
-          await image.toByteData(format: ui.ImageByteFormat.png);
+          await captured.toByteData(format: ui.ImageByteFormat.png);
       if (byteData == null) return;
       Uint8List pngBytes = byteData.buffer.asUint8List();
 
-      // Preprocess
+      // Preprocess to 28x28 and get normalized data
       final normalized = await _preprocessImage(pngBytes);
-      final processedBytes = await _gridToImage(normalized);
-      final prediction = await _runModel(normalized);
 
+      // Convert 28x28 back to PNG for display
+      img.Image processedImage = _normalizedToImage(normalized);
+      Uint8List processedBytes = Uint8List.fromList(img.encodePng(processedImage));
+
+      // Add new symbol placeholder
+      int index = savedSymbols.length;
+      savedSymbols.add(SymbolData(
+        thumbnail: pngBytes,
+        processed: processedBytes,
+      ));
+      setState(() {});
+
+      // Run model on normalized data
+      int prediction = await _runModel(normalized);
       setState(() {
-        savedSymbols.add(
-          SymbolData(
-            thumbnail: pngBytes,
-            processed: processedBytes,
-            prediction: prediction,
-          ),
-        );
+        savedSymbols[index].prediction = prediction;
       });
 
       debugPrint("Saved drawing #${savedSymbols.length}, prediction $prediction");
+
     } catch (e) {
-      debugPrint("Error saving drawing: $e");
+      debugPrint("Error saving and predicting: $e");
     }
   }
 
-  Future<List<List<double>>> _preprocessImage(Uint8List bytes) async {
-  // 1. Resize to 28x28
-  final codec =
-      await ui.instantiateImageCodec(bytes, targetWidth: 28, targetHeight: 28);
-  final frame = await codec.getNextFrame();
-  final image = frame.image;
+  Future<List<List<double>>> _preprocessImage(Uint8List pngBytes) async {
+    // Decode PNG bytes to an image
+    img.Image? original = img.decodeImage(pngBytes);
+    if (original == null) return List.generate(28, (_) => List.filled(28, 0.0));
 
-  // 2. Convert to grayscale
-  final byteData = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
-  if (byteData == null) return List.generate(28, (_) => List.filled(28, 0.0));
+    // Convert to grayscale for easier processing
+    img.Image gray = img.grayscale(original);
 
-  final data = byteData.buffer.asUint8List();
-  final List<List<double>> normalized = List.generate(
-    28,
-    (y) => List.generate(
-      28,
-      (x) {
-        final offset = (y * 28 + x) * 4;
-        final r = data[offset];
-        final g = data[offset + 1];
-        final b = data[offset + 2];
-        final a = data[offset + 3];
+    // 1. Find bounding box of non-black pixels
+    int minX = gray.width, minY = gray.height;
+    int maxX = 0, maxY = 0;
 
-        // Grayscale with alpha applied
-        final gray = (0.3 * r + 0.59 * g + 0.11 * b) * (a / 255.0);
+    for (int y = 0; y < gray.height; y++) {
+      for (int x = 0; x < gray.width; x++) {
+        // Get pixel using getPixel method which returns a Color
+        img.Color pixelColor = gray.getPixel(x, y);
+        // Get luminance from the color
+        num luminance = img.getLuminance(pixelColor);
+        
+        if (luminance > 0) { // Non-black
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
 
-        // Normalize to [0,1], invert so black=1, white=0
-        return (255.0 - gray) / 255.0;
-      },
-    ),
-  );
+    // If nothing drawn, return empty 28x28
+    if (minX > maxX || minY > maxY) {
+      return List.generate(28, (_) => List.filled(28, 0.0));
+    }
 
-  return normalized;
-}
-
-  Future<int> _runModel(List<List<double>> normalized) async {
-    // 1. Prepare input as 1x28x28x1 tensor
-    var input = List.generate(
-      1,
-      (_) => List.generate(
-        28,
-        (y) => List.generate(28, (x) => [normalized[y][x]]),
-      ),
+    // 2. Crop the bounding box
+    img.Image cropped = img.copyCrop(gray, 
+      x: minX, 
+      y: minY, 
+      width: maxX - minX + 1, 
+      height: maxY - minY + 1
     );
 
-    // 2. Prepare output as 1x10
+    // 3. Resize cropped image to 20x20
+    img.Image resized = img.copyResize(cropped, width: 20, height: 20);
+
+    // 4. Create 28x28 black canvas
+    img.Image canvas28 = img.Image(width: 28, height: 28);
+    // Fill with black color
+    img.fill(canvas28, color: img.ColorRgb8(0, 0, 0));
+
+    // Calculate center position
+    int offsetX = ((28 - resized.width) / 2).floor();
+    int offsetY = ((28 - resized.height) / 2).floor();
+    
+    // Copy resized image into center of canvas
+    img.compositeImage(canvas28, resized, dstX: offsetX, dstY: offsetY);
+
+    // 5. Normalize to 0..1 (white foreground)
+    List<List<double>> normalized = List.generate(
+      28,
+      (y) => List.generate(28, (x) {
+        // Get pixel color
+        img.Color pixelColor = canvas28.getPixel(x, y);
+        // Get luminance and normalize
+        num luminance = img.getLuminance(pixelColor);
+        return luminance / 255.0; // 0..1
+      }),
+    );
+
+    return normalized;
+  }
+
+  Future<int> _runModel(List<List<double>> normalized) async {
+    var input = List.generate(1, (_) =>
+        List.generate(28, (y) =>
+          List.generate(28, (x) => [normalized[y][x]])));
+
     var output = List.generate(1, (_) => List.filled(10, 0.0));
 
-    // 3. Run inference
     _interpreter.run(input, output);
 
-    // 4. Find prediction
-    int prediction = output[0].indexOf(output[0].reduce((a, b) => a > b ? a : b));
-
+    int prediction = output[0].indexOf(
+      output[0].reduce((a, b) => a > b ? a : b),
+    );
+    debugPrint("Predicted digit: $prediction");
     return prediction;
   }
 
@@ -386,10 +427,13 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                                   ],
                                 ),
                                 const SizedBox(width: 12),
-                                Text(
-                                  symbol.prediction != null
-                                      ? "Prediction: ${symbol.prediction}"
-                                      : "Predicting...",
+                                Expanded(
+                                  child: Text(
+                                    symbol.prediction != null
+                                        ? "Prediction: ${symbol.prediction}"
+                                        : "Predicting...",
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
                               ],
                             ),
@@ -398,6 +442,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                       },
                     ),
                   ),
+
                 ],
               ),
             ),
@@ -408,7 +453,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
               children: [
                 ElevatedButton(onPressed: _undo, child: const Text("Undo")),
                 ElevatedButton(onPressed: _clearCanvas, child: const Text("Clear")),
-                ElevatedButton(onPressed: _saveDrawings, child: const Text("Save Symbol")),
+                ElevatedButton(onPressed: _saveAndPredict, child: const Text("Save Symbol")),
               ],
             ),
           ],
