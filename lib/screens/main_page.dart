@@ -3,10 +3,24 @@ import 'package:senior_project/screens/glossary_screen.dart';
 import 'package:senior_project/screens/login_screen.dart';
 import 'package:senior_project/screens/symbols_screen.dart';
 
+import 'package:tflite_flutter/tflite_flutter.dart';
+import 'package:image/image.dart' as img;
 import 'package:scribble/scribble.dart';
-import 'package:flutter/rendering.dart';
 import 'dart:typed_data';
-import 'dart:ui' as ui;
+import 'dart:math';
+
+// CLASS THAT HOLDS RIGHT SIDE OUTPUT
+class SavedImage {
+  final Uint8List thumbnail;  // original canvas thumbnail
+  final int prediction;       // model prediction
+  final Uint8List modelView;  // preprocessed input for display
+
+  SavedImage({
+    required this.thumbnail, 
+    required this.prediction, 
+    required this.modelView,
+  });
+}
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -17,37 +31,173 @@ class MainPage extends StatefulWidget {
 
 class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin {
   
+  // CHANGES THICKNESS AND SETS COLOR OF PEN
+  final ScribbleNotifier _controller = ScribbleNotifier()
+  ..setStrokeWidth(18.0)  // Set pen width
+  ..setColor(Colors.black);
+
+
+  // CLASS OF SAVED IMAGES
+  final List<SavedImage> saved = [];
+
+  //MODEL INTERPRETER
+  late Interpreter interpreter;
+
   late AnimationController _animationController;
   bool isMenuOpen = false;
-  final ScribbleNotifier _notifier = ScribbleNotifier();
-  final GlobalKey _repaintKey = GlobalKey();
 
-  // Store all saved drawings here
-  List<Uint8List> savedImages = [];
-
-  Future<void> _saveDrawing() async {
+  Future<void> _loadModel() async {
+    interpreter = await Interpreter.fromAsset('assets/models/mnist.tflite');
+    print('Interpreter initialized: $interpreter');
+  }
+  
+  // SAVES IMAGE, CROPS IT, GRAYSCALES, SETS TO MODEL INPUT, GIVES TO MODEL, 
+  //SAVES PREDICTIONS, SAVES ITEM IN CLASS
+  Future<void> _handleSave() async {
     try {
-      RenderRepaintBoundary boundary =
-          _repaintKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+      print(interpreter.hashCode);
+      // 1. Render canvas as ByteData
+      final ByteData byteData = await _controller.renderImage();
+      final Uint8List thumbnail = byteData.buffer.asUint8List();
 
-      // Capture canvas as image
-      ui.Image image = await boundary.toImage(pixelRatio: 1.0);
+      // 2. Decode PNG for processing
+      final img.Image? image = img.decodeImage(thumbnail);
+      if (image == null) return;
 
-      // Convert to PNG bytes for storage
-      ByteData? byteData =
-          await image.toByteData(format: ui.ImageByteFormat.png);
-      if (byteData == null) return;
+      final int width = image.width;
+      final int height = image.height;
 
-      Uint8List pngBytes = byteData.buffer.asUint8List();
+      // 3. Find bounding box of non-white pixels
+      int minX = width, minY = height, maxX = 0, maxY = 0;
+      bool hasContent = false;
 
+      for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+        final pixel = image.getPixel(x, y);
+        final int r = pixel.r.toInt();
+        final int g = pixel.g.toInt();
+        final int b = pixel.b.toInt();
+        final gray = (0.299*r + 0.587*g + 0.114*b).toInt();
+
+        if (gray < 240) { // non-white pixel
+          hasContent = true;
+          minX = x < minX ? x : minX;
+          minY = y < minY ? y : minY;
+          maxX = x > maxX ? x : maxX;
+          maxY = y > maxY ? y : maxY;
+          }
+        }
+      }
+
+      // 4. Handle empty canvas
+      if (!hasContent) {
+        final emptyModelView = _createEmptyModelView();
+        setState(() {
+          saved.add(SavedImage(
+            thumbnail: thumbnail,
+            prediction: -1,
+            modelView: emptyModelView,
+          ));
+          _controller.clear();
+        });
+        return;
+      }
+
+      // 5. Crop to bounding box with some padding
+      final padding = 5;
+      final cropMinX = max(0, minX - padding);
+      final cropMinY = max(0, minY - padding);
+      final cropMaxX = min(width - 1, maxX + padding);
+      final cropMaxY = min(height - 1, maxY + padding);
+      
+      final cropped = img.copyCrop(
+        image,
+        x: cropMinX,
+        y: cropMinY,
+        width: cropMaxX - cropMinX + 1,
+        height: cropMaxY - cropMinY + 1,
+      );
+      
+
+      // 6. Resize while preserving aspect ratio to fit 20x20
+      final scale = 20 / max(cropped.width, cropped.height);
+      final newWidth = (cropped.width * scale).round();
+      final newHeight = (cropped.height * scale).round();
+      final resized = img.copyResize(cropped, width: newWidth, height: newHeight);
+
+      // 7. Center on 28x28 black canvas
+      final canvas28 = img.Image(width: 28, height: 28);
+      img.fill(canvas28, color: img.ColorRgb8(255, 255, 255));
+      final xOffset = ((28 - newWidth) / 2).round();
+      final yOffset = ((28 - newHeight) / 2).round();
+      img.compositeImage(canvas28, resized, dstX: xOffset, dstY: yOffset);
+
+      // 8. Convert to [1,28,28,1] with inverted grayscale
+      final input = List.generate(1, (_) => List.generate(28, (y) {
+        return List.generate(28, (x) {
+          final pixel = canvas28.getPixel(x, y);
+          final gray = (0.299*pixel.r + 0.587*pixel.g + 0.114*pixel.b)/255.0;
+          return [1 - gray]; // invert: black background → 0, white strokes → 1
+        });
+      }));
+
+      // 9. Run TFLite
+      var output = List.generate(1, (_) => List.filled(10, 0.0));
+      interpreter.run(input, output);
+
+      // 10. Get predicted digit
+      final prediction = output[0].indexWhere(
+        (v) => v == output[0].reduce((a, b) => a > b ? a : b),
+      );
+
+      // 11. Convert preprocessed input to image for display
+      Uint8List modelView = modelInputToImage(input);
+      
+      // 12. Save and clear
       setState(() {
-        savedImages.add(pngBytes);
+        saved.add(SavedImage(
+          thumbnail: thumbnail,
+          prediction: prediction,
+          modelView: modelView,
+        ));
+        _controller.clear();
       });
 
-      debugPrint("Saved image #${savedImages.length}");
+      print('Predicted digit: $prediction');
+
     } catch (e) {
-      debugPrint("Error saving drawing: $e");
+      print('Error in _handleSave: $e');
     }
+  }
+
+  // HELPER FOR HANDLESAVE FUNCTION
+  Uint8List _createEmptyModelView() {
+    final im = img.Image(width: 28, height: 28);
+    img.fill(im, color: img.ColorRgb8(255, 255, 255)); // White for empty
+    return Uint8List.fromList(img.encodePng(im));
+  }
+
+  // ALLOWS US TO SEE WHAT THE MODEL IS RECIEVING AS INPUT
+  Uint8List modelInputToImage(List<List<List<List<double>>>> input) {
+    // Create a 28x28 grayscale image
+    final im = img.Image(width: 28, height: 28);
+
+    for (int y = 0; y < 28; y++) {
+      for (int x = 0; x < 28; x++) {
+        // Retrieve the inverted grayscale value used by the model
+        final val = input[0][y][x][0]; // 0..1
+        final gray = ((1.0 - val) * 255).toInt(); // 1→0 (black), 0→255 (white)
+
+        // Clamp to valid range
+        final clampedGray = gray.clamp(0, 255);
+
+      // Set pixel
+      im.setPixelRgba(x, y, clampedGray, clampedGray, clampedGray, 255);
+      }
+    }
+
+    // Encode as PNG for display
+    return Uint8List.fromList(img.encodePng(im));
   }
 
   @override
@@ -57,26 +207,13 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
       vsync: this,
       duration: const Duration(milliseconds: 300),
     );
+    _loadModel();
   }
 
   @override
   void dispose() {
     _animationController.dispose();
     super.dispose();
-  }
-
-  
-  void _toggleMenu() {
-    if (isMenuOpen) {
-      _animationController.reverse();
-      Scaffold.of(context).openDrawer();
-    } else {
-      _animationController.forward();
-      Scaffold.of(context).openDrawer();
-    }
-    setState(() {
-      isMenuOpen = !isMenuOpen;
-    });
   }
 
   @override
@@ -183,71 +320,54 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                 elevation: 4,
                 child: Column(
                   children: [
-                  // Toolbar (Undo + Clear + Save)
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.undo),
-                          onPressed: () => _notifier.undo(),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.clear),
-                          onPressed: () => _notifier.clear(),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.save),
-                          onPressed: _saveDrawing,
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Drawing Area
-                  Expanded(
-                    child: RepaintBoundary(
-                      key: _repaintKey,
-                      child: Container(
-                        color: Colors.white,
-                        child: Scribble(
-                          notifier: _notifier,
-                        ),
+                    Container(
+                      width: 280,
+                      height: 280,
+                      color: Colors.white,
+                      child: Scribble(notifier: _controller, drawPen: true,),
                       ),
-                    ),
-                  ),
-                  // Thumbnails of saved drawings
-                  SizedBox(
-                    height: 100,
-                    child: ListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: savedImages.length,
-                      itemBuilder: (context, index) {
-                        return Padding(
-                          padding: const EdgeInsets.all(4.0),
-                          child: Image.memory(
-                            savedImages[index],
-                            width: 80,
-                            height: 80,
-                            fit: BoxFit.contain,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ],
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        ElevatedButton(onPressed: _controller.undo, child: const Text("Undo")),
+                        ElevatedButton(onPressed: _controller.clear, child: const Text("Clear")),
+                        ElevatedButton(onPressed: _handleSave, child: const Text("Save")),
+                      ],
+                    ),                  
+                  ],
                 ),
               ),
             ),
             const VerticalDivider(width: 1, color: Colors.grey),
             Expanded(
-              child: Material(
-                elevation: 4,
-                child: Container(
-                  color: Colors.white,
-                  child: const Center(
-                    child: Text('Transcription Area'),
+              child: Column(
+                children: [
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: saved.length,
+                      itemBuilder: (context, index) {
+                        final item = saved[index];
+                        return Row(
+                          children: [
+                            Image.memory(item.modelView, width: 50, height: 50), // shows model input
+                            SizedBox(width: 8),
+                            Text('Prediction: ${item.prediction}'),
+                          ],
+                        );
+                      },
+                    ),
                   ),
-                ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      ElevatedButton(
+                        onPressed: () => setState(() => saved.clear()),
+                        child: const Text("Clear All"),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
           ],
