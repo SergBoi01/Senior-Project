@@ -12,25 +12,16 @@ import 'dart:math';
 import 'dart:io';
 import 'dart:convert';
 
+// This code can be divided INTO gathering training data for model AND verifying model prediction, ModelView
+
+// For gathering
 // TO SEE SAVED TXT FILE OF LIST INPUTS. 
 // RUN PROGRAM THEN ON POWERSHELL VSCODE TERMINAL COPY 
 // adb pull /storage/emulated/0/Download/saved_data.txt C:\Users\Kirit\Downloads\
 
-
-// CLASS THAT HOLDS RIGHT SIDE OUTPUT
-class SavedImage {
-  final Uint8List thumbnail;  // original canvas thumbnail
-  final String prediction;       // model prediction
-  final Uint8List modelView;  // preprocessed input for display
-
-  SavedImage({
-    required this.thumbnail, 
-    required this.prediction, 
-    required this.modelView,
-  });
-}
-
-// CLASS THAT HOLDS MODEL
+// For gathering
+// Saves input and label needed to train a model and save to seperate file
+// Called save input/label and save to file to save in between runs
 class SaveModelInput {
   final List<List<List<List<double>>>> input;  // preprocessed input for display4
   final String label;
@@ -83,6 +74,22 @@ class SaveModelInput {
   }
 }
 
+// For verify
+// Saves thumbnail, model prediction, and modelView to display on the right-hand side
+// Called to verify the model it predicting and seeing input correctly
+class SavedImage {
+  final Uint8List thumbnail;  // original canvas thumbnail
+  final String prediction;       // model prediction
+  final Uint8List modelView;  // preprocessed input for display
+
+  SavedImage({
+    required this.thumbnail, 
+    required this.prediction, 
+    required this.modelView,
+  });
+}
+
+
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
 
@@ -92,23 +99,46 @@ class MainPage extends StatefulWidget {
 
 class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin {
   
-  // CHANGES THICKNESS AND SETS COLOR OF PEN
+  ///////////////////////////////////////////////////////////////////////////////
+  /// ALWAYS
+
+  // Always stays
+  // Change thickness/color of pen in canvas
   final ScribbleNotifier _controller = ScribbleNotifier()
-  ..setStrokeWidth(15.0)  // Set pen width
+  ..setStrokeWidth(15.0)  
   ..setColor(Colors.black);
 
-  // LIST OF SAVED IMAGES and SAVED INPUTS
-  final List<SavedImage> saved = [];
+  // Always stays
+  late Interpreter interpreter;
+
+  // UI ITEMS
+  late AnimationController _animationController;
+  bool isMenuOpen = false;
+
+  // Always stays
+  Future<void> _loadModel() async {
+    // Dependings on the model I want to run
+    interpreter = await Interpreter.fromAsset('assets/models/alphabet_25_50_trained.tflite');
+    print('Interpreter initialized: $interpreter');
+  }
+
+  ///////////////////////////////////////////////////////////////////////////////
+  /// GATHERING
+  
+  // For gathering
+  // Created to hold list of model inputs from user
   List<SaveModelInput> savedInputs = [];
 
-  // LIST OF LABELS // 
+  // For gathering
+  // Labels for Alphabet_25 model
   final List<String> labels = [
     'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z',
     'a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z',
   ];
-  int round = 25;
-  int index = 0; // current label index
 
+  // Loops List<String> labels
+  int round = 25; // completed rounds. is updated manually every run
+  int index = 0; // current label index
   String getNextLabel() {
     String label = labels[index];
     print('Index : $index out of 52' );
@@ -120,23 +150,215 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     }
     return label;
   }
-  String? currentLabel; // store the current label
-  //////
+  String? currentLabel;
 
-  //MODEL INTERPRETER
-  late Interpreter interpreter;
+  // For gathering
+  // Load previously saved training data from the emulator file into app memory
+  Future<void> loadSavedData() async {
+    try {
+      final directory = Directory('/storage/emulated/0/Download');
+      final file = File('${directory.path}/saved_data.txt');
 
-  // UI ITEMS
-  late AnimationController _animationController;
-  bool isMenuOpen = false;
+      // Uncomment this to clear the file (use carefully!)
+      // await file.writeAsString('');
+      // print('🗑️ Cleared saved_data.txt');
+      // return;
 
-  Future<void> _loadModel() async {
-    interpreter = await Interpreter.fromAsset('assets/models/alphabet_25_50_trained.tflite');
-    print('Interpreter initialized: $interpreter');
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        if (content.isNotEmpty) {
+          final List<dynamic> decoded = jsonDecode(content);
+          final loaded = decoded
+              .map((e) => SaveModelInput.fromJson(e as Map<String, dynamic>))
+              .toList();
+
+          // Don't overwrite savedInputs on load - it's for accumulating new data
+          // savedInputs = loaded;  // DON'T do this
+
+          print('📂 File contains ${loaded.length} saved inputs');
+          print('📍 File location: ${file.path}');
+        } else {
+          print('ℹ️ Saved file exists but is empty');
+        }
+      } else {
+        print('ℹ️ No saved data file found at ${file.path}');
+      }
+    } catch (e) {
+      print('❌ Error during loadSavedData: $e');
+    }
+  }
+  
+  // For gathering
+  // Preprocess drawing, 
+  // Saves in List<SaveModelInput> savedInputs
+  Future<void> _saveModelInputList(String label) async {
+    try {
+      print(interpreter.hashCode);
+      // 1. Render canvas as ByteData
+      final ByteData byteData = await _controller.renderImage();
+      final Uint8List thumbnail = byteData.buffer.asUint8List();
+
+      // 2. Decode PNG for processing
+      final img.Image? image = img.decodeImage(thumbnail);
+      if (image == null) return;
+
+      final int width = image.width;
+      final int height = image.height;
+
+      // 3. Find bounding box of non-white pixels
+      int minX = width, minY = height, maxX = 0, maxY = 0;
+      bool hasContent = false;
+
+      for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+        final pixel = image.getPixel(x, y);
+        final int r = pixel.r.toInt();
+        final int g = pixel.g.toInt();
+        final int b = pixel.b.toInt();
+        final gray = (0.299*r + 0.587*g + 0.114*b).toInt();
+
+        if (gray < 240) { // non-white pixel
+          hasContent = true;
+          minX = x < minX ? x : minX;
+          minY = y < minY ? y : minY;
+          maxX = x > maxX ? x : maxX;
+          maxY = y > maxY ? y : maxY;
+          }
+        }
+      }
+
+      // 4. Handle empty canvas
+      if (!hasContent) {
+        final emptyModelView = _createEmptyModelView();
+        setState(() {
+          saved.add(SavedImage(
+            thumbnail: thumbnail,
+            prediction: "",
+            modelView: emptyModelView,
+          ));
+          _controller.clear();
+        });
+        return;
+      }
+
+      // 5. Crop to bounding box with some padding
+      final padding = 5;
+      final cropMinX = max(0, minX - padding);
+      final cropMinY = max(0, minY - padding);
+      final cropMaxX = min(width - 1, maxX + padding);
+      final cropMaxY = min(height - 1, maxY + padding);
+      
+      final cropped = img.copyCrop(
+        image,
+        x: cropMinX,
+        y: cropMinY,
+        width: cropMaxX - cropMinX + 1,
+        height: cropMaxY - cropMinY + 1,
+      );
+
+      // 6. Resize while preserving aspect ratio to fit 20x20
+      final scale = 20 / max(cropped.width, cropped.height);
+      final newWidth = (cropped.width * scale).round();
+      final newHeight = (cropped.height * scale).round();
+      final resized = img.copyResize(cropped, width: newWidth, height: newHeight);
+
+      // 7. Center on 28x28 black canvas
+      final canvas28 = img.Image(width: 28, height: 28);
+      img.fill(canvas28, color: img.ColorRgb8(255, 255, 255));
+      final xOffset = ((28 - newWidth) / 2).round();
+      final yOffset = ((28 - newHeight) / 2).round();
+      img.compositeImage(canvas28, resized, dstX: xOffset, dstY: yOffset);
+
+      // 8. Convert to [1,28,28,1] with inverted grayscale
+      final processedInput = List.generate(1, (_) => List.generate(28, (y) {
+        return List.generate(28, (x) {
+          final pixel = canvas28.getPixel(x, y);
+          final gray = (0.299*pixel.r + 0.587*pixel.g + 0.114*pixel.b)/255.0;
+          return [1 - gray]; // invert: black background → 0, white strokes → 1
+        });
+      }));
+
+      // 2. Save and clear     
+      final sample = SaveModelInput(
+        input: processedInput,
+        label: label,
+      );
+      _controller.clear();
+
+
+      // 3. Add to the list
+      savedInputs.add(sample);
+      print('✅ Saved input with label $label. Total saved: ${savedInputs.length}');
+
+
+    } catch (e) {
+      print('Error in _handleSave: $e');
+    }
   }
 
-  // SAVES IMAGE, CROPS IT, GRAYSCALES, SETS TO MODEL INPUT, GIVES TO MODEL, 
-  // SAVES PREDICTIONS, SAVES ITEM IN CLASS
+  // For gathering
+  // Saves all items in List<SaveModelInput> savedInputs to an emulator file and clear current list
+  Future<void> ultimateSave() async {
+    try {
+      if (savedInputs.isEmpty) {
+        print('ℹ️ No inputs to save');
+        return;
+      }
+
+      // Path to the Download folder in the emulator
+      final directory = Directory('/storage/emulated/0/Download');
+      if (!await directory.exists()) {
+        await directory.create(recursive: true);
+      }
+
+      final file = File('${directory.path}/saved_data.txt');
+
+      // Load existing data if file exists
+      List<SaveModelInput> allInputs = [];
+      if (await file.exists()) {
+        try {
+          final content = await file.readAsString();
+          if (content.isNotEmpty) {
+            final List<dynamic> decoded = jsonDecode(content);
+            allInputs = decoded
+                .map((e) => SaveModelInput.fromJson(e as Map<String, dynamic>))
+                .toList();
+            print('📂 Loaded ${allInputs.length} existing inputs from file');
+          }
+        } catch (e) {
+          print('⚠️ Error loading existing data: $e');
+        }
+      }
+
+      // Add new inputs to existing data
+      allInputs.addAll(savedInputs);
+
+      // Convert all data to JSON and save
+      final jsonStr = jsonEncode(allInputs.map((e) => e.toJson()).toList());
+      await file.writeAsString(jsonStr);
+
+      print('✅ Saved ${savedInputs.length} new inputs. Total in file: ${allInputs.length}');
+      print('📍 File location: ${file.path}');
+
+      // Clear the in-memory list after successful save
+      savedInputs.clear();
+
+    } catch (e) {
+      print('❌ Error during ultimateSave: $e');
+    }
+  }
+  
+  
+  ///////////////////////////////////////////////////////////////////////////////
+  /// VERIFYING
+  
+  // For verifying
+  // Created to hold list of process symbols from user with prediction - for right right
+  final List<SavedImage> saved = [];
+
+  // For verifying
+  // Preprocess drawing, runs model, 
+  // Saves prediction in List<SavedImage> saved - for right side
   Future<void> _handleSave () async {
     try {
       print(interpreter.hashCode);
@@ -259,122 +481,9 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
       print('Error in _handleSave: $e');
     }
   }
-  
-  // SAVES IMAGE, CROPS IT, GRAYSCALES, SETS TO MODEL INPUT, 
-  // SAVES IN CLASS W/ LABEL
-  Future<void> _saveModelInputList(String label) async {
-    try {
-      print(interpreter.hashCode);
-      // 1. Render canvas as ByteData
-      final ByteData byteData = await _controller.renderImage();
-      final Uint8List thumbnail = byteData.buffer.asUint8List();
 
-      // 2. Decode PNG for processing
-      final img.Image? image = img.decodeImage(thumbnail);
-      if (image == null) return;
-
-      final int width = image.width;
-      final int height = image.height;
-
-      // 3. Find bounding box of non-white pixels
-      int minX = width, minY = height, maxX = 0, maxY = 0;
-      bool hasContent = false;
-
-      for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-        final pixel = image.getPixel(x, y);
-        final int r = pixel.r.toInt();
-        final int g = pixel.g.toInt();
-        final int b = pixel.b.toInt();
-        final gray = (0.299*r + 0.587*g + 0.114*b).toInt();
-
-        if (gray < 240) { // non-white pixel
-          hasContent = true;
-          minX = x < minX ? x : minX;
-          minY = y < minY ? y : minY;
-          maxX = x > maxX ? x : maxX;
-          maxY = y > maxY ? y : maxY;
-          }
-        }
-      }
-
-      // 4. Handle empty canvas
-      if (!hasContent) {
-        final emptyModelView = _createEmptyModelView();
-        setState(() {
-          saved.add(SavedImage(
-            thumbnail: thumbnail,
-            prediction: "",
-            modelView: emptyModelView,
-          ));
-          _controller.clear();
-        });
-        return;
-      }
-
-      // 5. Crop to bounding box with some padding
-      final padding = 5;
-      final cropMinX = max(0, minX - padding);
-      final cropMinY = max(0, minY - padding);
-      final cropMaxX = min(width - 1, maxX + padding);
-      final cropMaxY = min(height - 1, maxY + padding);
-      
-      final cropped = img.copyCrop(
-        image,
-        x: cropMinX,
-        y: cropMinY,
-        width: cropMaxX - cropMinX + 1,
-        height: cropMaxY - cropMinY + 1,
-      );
-
-      // 6. Resize while preserving aspect ratio to fit 20x20
-      final scale = 20 / max(cropped.width, cropped.height);
-      final newWidth = (cropped.width * scale).round();
-      final newHeight = (cropped.height * scale).round();
-      final resized = img.copyResize(cropped, width: newWidth, height: newHeight);
-
-      // 7. Center on 28x28 black canvas
-      final canvas28 = img.Image(width: 28, height: 28);
-      img.fill(canvas28, color: img.ColorRgb8(255, 255, 255));
-      final xOffset = ((28 - newWidth) / 2).round();
-      final yOffset = ((28 - newHeight) / 2).round();
-      img.compositeImage(canvas28, resized, dstX: xOffset, dstY: yOffset);
-
-      // 8. Convert to [1,28,28,1] with inverted grayscale
-      final processedInput = List.generate(1, (_) => List.generate(28, (y) {
-        return List.generate(28, (x) {
-          final pixel = canvas28.getPixel(x, y);
-          final gray = (0.299*pixel.r + 0.587*pixel.g + 0.114*pixel.b)/255.0;
-          return [1 - gray]; // invert: black background → 0, white strokes → 1
-        });
-      }));
-
-      // 2. Save and clear     
-      final sample = SaveModelInput(
-        input: processedInput,
-        label: label,
-      );
-      _controller.clear();
-
-
-      // 3. Add to the list
-      savedInputs.add(sample);
-      print('✅ Saved input with label $label. Total saved: ${savedInputs.length}');
-
-
-    } catch (e) {
-      print('Error in _handleSave: $e');
-    }
-  }
-
-  // HELPER FOR HANDLESAVE FUNCTION
-  Uint8List _createEmptyModelView() {
-    final im = img.Image(width: 28, height: 28);
-    img.fill(im, color: img.ColorRgb8(255, 255, 255)); // White for empty
-    return Uint8List.fromList(img.encodePng(im));
-  }
-
-  // ALLOWS US TO SEE WHAT THE MODEL IS RECIEVING AS INPUT
+  // For verifying
+  // Lets the testers/creaters see what the model is seeing
   Uint8List modelInputToImage(List<List<List<List<double>>>> input) {
     // Create a 28x28 grayscale image
     final im = img.Image(width: 28, height: 28);
@@ -397,93 +506,15 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     return Uint8List.fromList(img.encodePng(im));
   }
 
-  // Save all collected model inputs to a local file and clear current list
-  // Fixed ultimateSave - APPEND to existing data instead of overwriting
-  Future<void> ultimateSave() async {
-    try {
-      if (savedInputs.isEmpty) {
-        print('ℹ️ No inputs to save');
-        return;
-      }
-
-      // Path to the Download folder in the emulator
-      final directory = Directory('/storage/emulated/0/Download');
-      if (!await directory.exists()) {
-        await directory.create(recursive: true);
-      }
-
-      final file = File('${directory.path}/saved_data.txt');
-
-      // Load existing data if file exists
-      List<SaveModelInput> allInputs = [];
-      if (await file.exists()) {
-        try {
-          final content = await file.readAsString();
-          if (content.isNotEmpty) {
-            final List<dynamic> decoded = jsonDecode(content);
-            allInputs = decoded
-                .map((e) => SaveModelInput.fromJson(e as Map<String, dynamic>))
-                .toList();
-            print('📂 Loaded ${allInputs.length} existing inputs from file');
-          }
-        } catch (e) {
-          print('⚠️ Error loading existing data: $e');
-        }
-      }
-
-      // Add new inputs to existing data
-      allInputs.addAll(savedInputs);
-
-      // Convert all data to JSON and save
-      final jsonStr = jsonEncode(allInputs.map((e) => e.toJson()).toList());
-      await file.writeAsString(jsonStr);
-
-      print('✅ Saved ${savedInputs.length} new inputs. Total in file: ${allInputs.length}');
-      print('📍 File location: ${file.path}');
-
-      // Clear the in-memory list after successful save
-      savedInputs.clear();
-
-    } catch (e) {
-      print('❌ Error during ultimateSave: $e');
-    }
+  // For both
+  // Called to creates an empty 28x28 canvas
+  // Helper for functions: _handleSave and _saveModelInputList
+  Uint8List _createEmptyModelView() {
+    final im = img.Image(width: 28, height: 28);
+    img.fill(im, color: img.ColorRgb8(255, 255, 255)); // White for empty
+    return Uint8List.fromList(img.encodePng(im));
   }
-  
-  // Load previously saved data from the local file into memory
-  Future<void> loadSavedData() async {
-    try {
-      final directory = Directory('/storage/emulated/0/Download');
-      final file = File('${directory.path}/saved_data.txt');
 
-      // Uncomment this to clear the file (use carefully!)
-      // await file.writeAsString('');
-      // print('🗑️ Cleared saved_data.txt');
-      // return;
-
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        if (content.isNotEmpty) {
-          final List<dynamic> decoded = jsonDecode(content);
-          final loaded = decoded
-              .map((e) => SaveModelInput.fromJson(e as Map<String, dynamic>))
-              .toList();
-
-          // Don't overwrite savedInputs on load - it's for accumulating new data
-          // savedInputs = loaded;  // DON'T do this
-
-          print('📂 File contains ${loaded.length} saved inputs');
-          print('📍 File location: ${file.path}');
-        } else {
-          print('ℹ️ Saved file exists but is empty');
-        }
-      } else {
-        print('ℹ️ No saved data file found at ${file.path}');
-      }
-    } catch (e) {
-      print('❌ Error during loadSavedData: $e');
-    }
-  }
-  
   @override
   void initState() {
     super.initState();
@@ -491,9 +522,11 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
       vsync: this,
       duration: const Duration(milliseconds: 300),
     );
-    _loadModel();
-    loadSavedData();
-    currentLabel = getNextLabel(); // pick first label when app starts
+    _loadModel(); // always stays
+
+    // Only called if gathering training data
+    // loadSavedData();
+    // currentLabel = getNextLabel(); 
   }
 
   @override
@@ -510,10 +543,20 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
         backgroundColor: Colors.transparent,
         elevation: 0,
         automaticallyImplyLeading: false,
+        // This changes depending if we are gathering training data or verifying model prediction, ModelView
+        
+        // If gathering data use
+        //title: Text(
+        //  'Please write "$currentLabel" and click save',
+        //  style: const TextStyle(color: Colors.black),
+        //),
+
+        // If verifying use
         title: Text(
-          'Please write "$currentLabel" and click save',
+          "Welcome User", 
           style: const TextStyle(color: Colors.black),
         ),
+
         leading: Builder(
           builder: (context) => IconButton(
             icon: AnimatedBuilder(
@@ -622,24 +665,29 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                           onPressed: () async {
                             if (currentLabel == null) return;
 
+                            // This changes depending if we are gathering training data or verifying model prediction, ModelView
+
+                            // If gathering training data use this 
+
                             //await _saveModelInputList(currentLabel!);
-                            await _handleSave();
                             //await ultimateSave();
 
                             // Check if we've completed 50 rounds
-                            if (round >= 50) {
-                              // Optionally show a message
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('✅ Collection complete!')),
-                              );
-                              return; // stop here, don't pick a new label
-                            }
-
+                            //if (round >= 50) {
+                            //  // Optionally show a message
+                            //  ScaffoldMessenger.of(context).showSnackBar(
+                            //   const SnackBar(content: Text('✅ Collection complete!')),
+                            //  );
+                            //  return; // stop here, don't pick a new label
+                            //}
+                            
                             // Pick a new label after saving
-                            setState(() {
-                              currentLabel = getNextLabel();
-                              
-                            });
+                            //setState(() {
+                            //  currentLabel = getNextLabel();                              
+                            //});
+
+                            // If verifying model prediction, ModelView use this 
+                            await _handleSave();         
                           },
                           child: const Text('Save'),
                         ),
@@ -660,7 +708,8 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                         final item = saved[index];
                         return Row(
                           children: [
-                            Image.memory(item.modelView, width: 50, height: 50), // shows model input
+                            // Works if we are verifying model prediction, ModelView
+                            Image.memory(item.modelView, width: 50, height: 50), 
                             SizedBox(width: 8),
                             Image.memory(item.thumbnail, width: 50, height: 50),
                             SizedBox(width: 8),
