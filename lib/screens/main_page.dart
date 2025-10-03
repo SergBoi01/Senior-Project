@@ -350,7 +350,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   
   
   ///////////////////////////////////////////////////////////////////////////////
-  /// VERIFYING
+  /// VERIFYING - WORKS
   
   // For verifying
   // Created to hold list of process symbols from user with prediction - for right right
@@ -515,6 +515,9 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     return Uint8List.fromList(img.encodePng(im));
   }
 
+  ///////////////////////////////////////////////////////////////////////////////
+  /// VERIFYING MULTIPLE INPUTS CANVAS- TESTING
+  
   @override
   void initState() {
     super.initState();
