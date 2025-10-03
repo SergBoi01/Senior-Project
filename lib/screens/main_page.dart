@@ -8,7 +8,8 @@ import 'package:image/image.dart' as img;
 import 'package:scribble/scribble.dart';
 import 'dart:typed_data';
 import 'dart:math';
-
+import 'dart:ui' as ui;
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 
@@ -74,7 +75,7 @@ class SaveModelInput {
   }
 }
 
-// For verify
+// For verifying
 // Saves thumbnail, model prediction, and modelView to display on the right-hand side
 // Called to verify the model it predicting and seeing input correctly
 class SavedImage {
@@ -89,6 +90,12 @@ class SavedImage {
   });
 }
 
+// For verifying
+// Holds boundariy lines
+class BoundingBox {
+  int minX, minY, maxX, maxY;
+  BoundingBox(this.minX, this.minY, this.maxX, this.maxY);
+}
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -105,7 +112,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   // Always stays
   // Change thickness/color of pen in canvas
   final ScribbleNotifier _controller = ScribbleNotifier()
-  ..setStrokeWidth(15.0)  
+  ..setStrokeWidth(10.0)  
   ..setColor(Colors.black);
 
   // Always stays
@@ -122,7 +129,25 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     print('Interpreter initialized: $interpreter');
   }
 
-  ///////////////////////////////////////////////////////////////////////////////
+  // adds timer to check symbols automatically 
+  Timer? _autoProcessTimer;
+  bool _isProcessing = false; // Prevent overlapping calls
+  // functions for automatic symbol check
+  void _startAutoProcessing() {
+    _autoProcessTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
+      if (!_isProcessing) {
+        _isProcessing = true;
+        await multiple();
+        _isProcessing = false;
+      }
+    });
+  }
+  void _stopAutoProcessing() {
+    _autoProcessTimer?.cancel();
+    _autoProcessTimer = null;
+  }
+  
+  ////GATHERING///////////////////////////////////////////////////////////////////////////
   /// GATHERING
   
   // For gathering
@@ -348,7 +373,6 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     }
   }
   
-  
   ///////////////////////////////////////////////////////////////////////////////
   /// VERIFYING - WORKS
   
@@ -460,8 +484,6 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
       // Get the corresponding label
       final predictedLabel = labels[maxIndex];
 
-      
-
       // 11. Convert preprocessed input to image for display
       Uint8List modelView = modelInputToImage(input);
       
@@ -518,6 +540,193 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   ///////////////////////////////////////////////////////////////////////////////
   /// VERIFYING MULTIPLE INPUTS CANVAS- TESTING
   
+  // For verifying
+  // Turns entire canvas Uint8List
+  Future<Uint8List> getCanvasBytes(ui.Image image) async {
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    return byteData!.buffer.asUint8List();
+  }
+  
+  // For verifying
+  // BFS through canvas to make bound boxes in symbols
+  List<BoundingBox> detectSymbols(Uint8List rgba, int width, int height) {
+    final visited = List<bool>.filled(width * height, false);
+    final boxes = <BoundingBox>[];
+
+    bool isBlack(int x, int y) {
+      final i = (y * width + x) * 4;
+      final r = rgba[i], g = rgba[i + 1], b = rgba[i + 2], a = rgba[i + 3];
+      // Treat opaque dark pixels as “black”
+      return a > 0 && (r < 50 && g < 50 && b < 50);
+    }
+
+    void floodFill(int startX, int startY) {
+      final stack = <List<int>>[];
+      stack.add([startX, startY]);
+      visited[startY * width + startX] = true;
+
+      int minX = startX, maxX = startX;
+      int minY = startY, maxY = startY;
+
+      while (stack.isNotEmpty) {
+        final point = stack.removeLast();
+        final x = point[0], y = point[1];
+
+        // Track bounding box
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+
+        for (var dx = -1; dx <= 1; dx++) {
+          for (var dy = -1; dy <= 1; dy++) {
+            if (dx == 0 && dy == 0) continue;
+            final nx = x + dx, ny = y + dy;
+            if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+            final idx = ny * width + nx;
+            if (!visited[idx] && isBlack(nx, ny)) {
+              visited[idx] = true;
+              stack.add([nx, ny]);
+            }
+          }
+        }
+      }
+
+      boxes.add(BoundingBox(minX, minY, maxX, maxY));
+    }
+
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        final idx = y * width + x;
+        if (!visited[idx] && isBlack(x, y)) {
+          floodFill(x, y);
+        }
+      }
+    }
+
+    return boxes;
+  }
+  
+  // For verifying
+  // Goes through List<BoundingBox>, preprocess, runs model
+  Future<void> multiple() async {
+    try {
+      // Step 1: Render canvas to ui.Image
+      final ByteData byteData = await _controller.renderImage();
+      final Uint8List pngBytes = byteData.buffer.asUint8List();
+      
+      // Decode to get dimensions
+      final ui.Codec codec = await ui.instantiateImageCodec(pngBytes);
+      final ui.FrameInfo frameInfo = await codec.getNextFrame();
+      final ui.Image uiImage = frameInfo.image;
+
+      // Step 2: Convert to raw RGBA bytes
+      final Uint8List rgba = await getCanvasBytes(uiImage);
+      
+      // Step 3: Detect all symbol bounding boxes
+      final List<BoundingBox> boxes = detectSymbols(rgba, uiImage.width, uiImage.height);
+      print('Detected ${boxes.length} symbols');
+
+      if (boxes.isEmpty) {
+        print('No symbols detected on canvas');
+        return;
+      }
+
+      // Step 4: Decode PNG for image processing
+      final img.Image? fullImage = img.decodeImage(pngBytes);
+      if (fullImage == null) {
+        print('Failed to decode canvas image');
+        return;
+      }
+
+      // Step 5: Process each detected symbol
+      for (int i = 0; i < boxes.length; i++) {
+        final box = boxes[i];
+        print('Processing symbol ${i + 1}/${boxes.length}');
+
+        // Skip if box is too small (noise)
+        final boxWidth = box.maxX - box.minX + 1;
+        final boxHeight = box.maxY - box.minY + 1;
+        if (boxWidth < 5 || boxHeight < 5) {
+          print('Skipping small box: ${boxWidth}x${boxHeight}');
+          continue;
+        }
+
+        // Crop to bounding box with padding
+        final padding = 5;
+        final cropMinX = max(0, box.minX - padding);
+        final cropMinY = max(0, box.minY - padding);
+        final cropMaxX = min(fullImage.width - 1, box.maxX + padding);
+        final cropMaxY = min(fullImage.height - 1, box.maxY + padding);
+        
+        final cropped = img.copyCrop(
+          fullImage,
+          x: cropMinX,
+          y: cropMinY,
+          width: cropMaxX - cropMinX + 1,
+          height: cropMaxY - cropMinY + 1,
+        );
+
+        // Resize while preserving aspect ratio to fit 20x20
+        final scale = 20 / max(cropped.width, cropped.height);
+        final newWidth = (cropped.width * scale).round();
+        final newHeight = (cropped.height * scale).round();
+        final resized = img.copyResize(cropped, width: newWidth, height: newHeight);
+
+        // Center on 28x28 white canvas
+        final canvas28 = img.Image(width: 28, height: 28);
+        img.fill(canvas28, color: img.ColorRgb8(255, 255, 255));
+        final xOffset = ((28 - newWidth) / 2).round();
+        final yOffset = ((28 - newHeight) / 2).round();
+        img.compositeImage(canvas28, resized, dstX: xOffset, dstY: yOffset);
+
+        // Convert to [1,28,28,1] with inverted grayscale
+        final input = List.generate(1, (_) => List.generate(28, (y) {
+          return List.generate(28, (x) {
+            final pixel = canvas28.getPixel(x, y);
+            final gray = (0.299 * pixel.r + 0.587 * pixel.g + 0.114 * pixel.b) / 255.0;
+            return [1 - gray]; // white background → 0, black strokes → 1
+          });
+        }));
+
+        // Run TFLite model
+        var output = List.generate(1, (_) => List.filled(52, 0.0));
+        interpreter.run(input, output);
+
+        // Find predicted label
+        final outputList = output[0];
+        final maxIndex = outputList.indexWhere(
+          (v) => v == outputList.reduce((a, b) => a > b ? a : b),
+        );
+        final predictedLabel = labels[maxIndex];
+        final confidence = outputList[maxIndex];
+        
+        print('Symbol ${i + 1}: "$predictedLabel" (${(confidence * 100).toStringAsFixed(1)}% confidence)');
+
+        // Convert preprocessed input to image for display
+        final Uint8List modelView = modelInputToImage(input);
+        final Uint8List symbolThumbnail = Uint8List.fromList(img.encodePng(canvas28));
+
+        // Add to saved list
+        setState(() {
+          saved.add(SavedImage(
+            thumbnail: symbolThumbnail,
+            prediction: predictedLabel,
+            modelView: modelView,
+          ));
+        });
+      }
+
+      // Clear canvas after processing all symbols
+      
+      print('✅ Processed ${boxes.length} symbols');
+
+    } catch (e) {
+      print('❌ Error in multiple(): $e');
+    }
+  }
+
+  ///// END FUNCTIONS /////
   @override
   void initState() {
     super.initState();
@@ -526,6 +735,10 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
       duration: const Duration(milliseconds: 300),
     );
     _loadModel(); // always stays
+    // starts timer - always stays
+    _loadModel().then((_) { // always stays
+      _startAutoProcessing();
+    });
 
     // Only called if gathering training data
     // loadSavedData();
@@ -535,11 +748,12 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   @override
   void dispose() {
     _animationController.dispose();
+    _stopAutoProcessing();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) {    
     return Scaffold(
       backgroundColor: Colors.grey[500],
       appBar: AppBar(
@@ -644,94 +858,220 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
         ),
       ),
       body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 15.0, vertical: 15.0),
+        padding: const EdgeInsets.all(15.0),
         child: Row(
           children: [
+            // left side - canvas
             Expanded(
+              flex: 80,
               child: Material(
                 elevation: 4,
-                child: Column(
-                  children: [
-                    Container(
-                      width: 400,
-                      height: 400,
-                      color: Colors.white,
-                      child: Scribble(notifier: _controller, drawPen: true,),
-                      ),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    // Calculate canvas size based on available height
+                    final availableWidth = constraints.maxWidth - 40;
+                    final availableHeight = constraints.maxHeight;
+                    final buttonAreaHeight = 80.0; // Space for buttons and spacing
+                    final maxCanvasHeight = availableHeight - buttonAreaHeight;
+
+                    // Use full available width and height (rectangle)
+                    final canvasWidth = availableWidth.clamp(200.0, double.infinity);
+                    final canvasHeight = maxCanvasHeight.clamp(200.0, double.infinity);
+                
+                    return Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        ElevatedButton(onPressed: _controller.undo, child: const Text("Undo")),
-                        ElevatedButton(onPressed: _controller.clear, child: const Text("Clear")),
-                        ElevatedButton(
-                          onPressed: () async {
-                            if (currentLabel == null) return;
-
-                            // This changes depending if we are gathering training data or verifying model prediction, ModelView
-
-                            // If gathering training data use this 
-
-                            //await _saveModelInputList(currentLabel!);
-                            //await ultimateSave();
-
-                            // Check if we've completed 50 rounds
-                            //if (round >= 50) {
-                            //  // Optionally show a message
-                            //  ScaffoldMessenger.of(context).showSnackBar(
-                            //   const SnackBar(content: Text('✅ Collection complete!')),
-                            //  );
-                            //  return; // stop here, don't pick a new label
-                            //}
-                            
-                            // Pick a new label after saving
-                            //setState(() {
-                            //  currentLabel = getNextLabel();                              
-                            //});
-
-                            // If verifying model prediction, ModelView use this 
-                            await _handleSave();         
-                          },
-                          child: const Text('Save'),
+                        // canvas
+                        Container(
+                          width: canvasWidth, 
+                          height: canvasHeight,
+                          color: Colors.white,
+                          child: Scribble(notifier: _controller, drawPen: true,),
                         ),
+                        const SizedBox(height: 14),
+                        // Buttons - under canvas
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              // If narrow, stack vertically; otherwise horizontal
+                              if (constraints.maxWidth < 400) {
+                                return Column(
+                                  children: [
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: ElevatedButton(
+                                        onPressed: _controller.undo, 
+                                        child: const Text("Undo")
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: ElevatedButton(
+                                        onPressed: _controller.clear, 
+                                        child: const Text("Clear")
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: ElevatedButton(
+                                        // This changes depending if we are gathering training data or verifying model prediction, ModelView
+
+                                        // If gathering training data use this 
+                                        //if (currentLabel == null) return;
+                                        //await _saveModelInputList(currentLabel!);
+                                        //await ultimateSave();
+
+                                        // Check if we've completed 50 rounds
+                                        //if (round >= 50) {
+                                        //  // Optionally show a message
+                                        //  ScaffoldMessenger.of(context).showSnackBar(
+                                        //   const SnackBar(content: Text('Collection complete!')),
+                                        //  );
+                                        //  return; // stop here, don't pick a new label
+                                        //}
+                                          
+                                        // Pick a new label after saving
+                                        //setState(() {
+                                        //  currentLabel = getNextLabel();                              
+                                        //});
+
+                                        // If verifying model prediction, ModelView use this 
+                                        onPressed: multiple, 
+                                        child: const Text('Save'),
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              } else {
+                                return Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                  children: [
+                                    Expanded(
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                                        child: ElevatedButton(
+                                          onPressed: _controller.undo, 
+                                          child: const Text("Undo")
+                                        ),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                                        child: ElevatedButton(
+                                          onPressed: _controller.clear, 
+                                          child: const Text("Clear")
+                                        ),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                                        child: ElevatedButton(
+                                          // This changes depending if we are gathering training data or verifying model prediction, ModelView
+
+                                          // If gathering training data use this 
+                                          //if (currentLabel == null) return;
+                                          //await _saveModelInputList(currentLabel!);
+                                          //await ultimateSave();
+
+                                          // Check if we've completed 50 rounds
+                                          //if (round >= 50) {
+                                          //  // Optionally show a message
+                                          //  ScaffoldMessenger.of(context).showSnackBar(
+                                          //   const SnackBar(content: Text('Collection complete!')),
+                                          //  );
+                                          //  return; // stop here, don't pick a new label
+                                          //}
+                                          
+                                          // Pick a new label after saving
+                                          //setState(() {
+                                          //  currentLabel = getNextLabel();                              
+                                          //});
+
+                                          // If verifying model prediction, ModelView use this 
+                                          onPressed: multiple, 
+                                          child: const Text('Save'),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              }
+                            },
+                          ),
+                        ), 
+                        const SizedBox(height: 16),               
                       ],
-                    ),                  
-                  ],
+                    );
+                  },
                 ),
               ),
             ),
-            const VerticalDivider(width: 1, color: Colors.grey),
+            // side divider                  
+            const VerticalDivider(width: 1, color: Colors.grey, thickness: 1),
+            
+            // right side - predictions
             Expanded(
-              child: Column(
-                children: [
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: saved.length,
-                      itemBuilder: (context, index) {
-                        final item = saved[index];
-                        return Row(
-                          children: [
-                            // Works if we are verifying model prediction, ModelView
-                            Image.memory(item.modelView, width: 50, height: 50), 
-                            SizedBox(width: 8),
-                            Image.memory(item.thumbnail, width: 50, height: 50),
-                            SizedBox(width: 8),
-                            Text('Prediction: ${item.prediction}'),
-                          ],
-                        );
-                      },
-                    ),
-                  ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      ElevatedButton(
-                        onPressed: () => setState(() => saved.clear()),
-                        child: const Text("Clear All"),
+              flex: 20,
+              child: Container(
+                color: Colors.grey[400],
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: ListView.builder(
+                        padding: const EdgeInsets.all(8.0),
+                        itemCount: saved.length,
+                        itemBuilder: (context, index) {
+                          final item = saved[index];
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4.0),
+                            child: Column(
+                              children: [
+                                Row(
+                                  children: [
+                                    // Works if we are verifying model prediction, ModelView
+                                    Image.memory(
+                                      item.modelView, 
+                                      width: 40, height: 40, 
+                                      fit: BoxFit.contain,
+                                    ), 
+                                    const SizedBox(width: 4),
+                                    Image.memory(
+                                      item.thumbnail, 
+                                      width: 40, height: 40, 
+                                      fit: BoxFit.contain,
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4,),
+                                Text(
+                                  'Prediction: ${item.prediction}',
+                                  style: const TextStyle(fontSize: 12),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const Divider(),
+                              ],
+                            ),
+                          );
+                        },
                       ),
-                    ],
-                  ),
-                ],
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton (
+                          onPressed: () => setState(() => saved.clear()),
+                          child: const Text("Clear All"),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
