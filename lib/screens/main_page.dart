@@ -18,7 +18,7 @@ import 'dart:convert';
 // For gathering
 // TO SEE SAVED TXT FILE OF LIST INPUTS. 
 // RUN PROGRAM THEN ON POWERSHELL VSCODE TERMINAL COPY 
-// adb pull /storage/emulated/0/Download/saved_data.txt C:\Users\Kirit\Downloads\
+// adb pull /storage/emulated/0/Download/saved_symbol_data.txt C:\Users\Kirit\Downloads\
 
 // For gathering
 // Saves input and label needed to train a model and save to seperate file
@@ -162,7 +162,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   ];
 
   // Loops List<String> labels
-  int round = 25; // completed rounds. is updated manually every run
+  int round = 0; // completed rounds. is updated manually every run
   int index = 0; // current label index
   String getNextLabel() {
     String label = labels[index];
@@ -978,8 +978,8 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                                           //await _saveModelInputList(currentLabel!);
                                           //await ultimateSave();
 
-                                          // Check if we've completed 50 rounds
-                                          //if (round >= 50) {
+                                          // Check if we've completed 25 rounds
+                                          //if (round >= 25) {
                                           //  // Optionally show a message
                                           //  ScaffoldMessenger.of(context).showSnackBar(
                                           //   const SnackBar(content: Text('Collection complete!')),
