@@ -1,22 +1,30 @@
+import 'dart:typed_data';
+
 class GlossaryEntry {
   String english;
   String spanish;
   String definition;
+  String synonym;  
   String symbol;
+  Uint8List? symbolImage; // for drawn symbols
 
-  // Main constructor (used by glossary_screen.dart)
+  // Main constructor
   GlossaryEntry({
     required this.english,
     required this.spanish,
     required this.definition,
+    required this.synonym,
     required this.symbol,
+    this.symbolImage,
   });
 
-  // Optional short constructor for symbol/word initialization
+  // Short constructor for symbol/word initialization
   GlossaryEntry.short({required this.symbol, required String word})
       : english = word,
         spanish = "",
-        definition = "";
+        definition = "",
+        synonym = "",
+        symbolImage = null;
 }
 
 class Glossary {
@@ -44,15 +52,30 @@ class Glossary {
   /// Expose entries list (read-only reference)
   List<GlossaryEntry> get entries => _entries;
 
-  /// Add entry — full version (used in your GlossaryScreen)
-  void addEntry(String english, String spanish, String definition, String symbol) {
-    _entries.add(GlossaryEntry(
-      english: english,
-      spanish: spanish,
-      definition: definition,
-      symbol: symbol,
-    ));
+  // Add entry
+ void addEntry(String english, String spanish, String definition, String synonym, String symbol, [Uint8List? symbolImage]) {
+  _entries.add(GlossaryEntry(
+    english: english,
+    spanish: spanish,
+    definition: definition,
+    synonym: synonym,
+    symbol: symbol,
+    symbolImage: symbolImage,
+  ));
+}
+// Update entry
+void updateEntry(int index, String english, String spanish, String definition, String synonym, String symbol, [Uint8List? symbolImage]) {
+  if (index >= 0 && index < _entries.length) {
+    _entries[index].english = english;
+    _entries[index].spanish = spanish;
+    _entries[index].definition = definition;
+    _entries[index].synonym = synonym;
+    _entries[index].symbol = symbol;
+    if (symbolImage != null) {
+      _entries[index].symbolImage = symbolImage;
+    }
   }
+}
 
   /// Optional short add for symbol/word pairs
   void addShort(String symbol, String word) {
