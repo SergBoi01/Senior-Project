@@ -26,3 +26,4 @@ flutter:
   assets:
     - assets/models/mnist.tflite
     - assets/models/alphabet_25_50_trained.tflite
+    - assets/models/symbol_detector.tflite

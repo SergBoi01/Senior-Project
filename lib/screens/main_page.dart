@@ -79,22 +79,36 @@ class SaveModelInput {
 // Saves thumbnail, model prediction, and modelView to display on the right-hand side
 // Called to verify the model it predicting and seeing input correctly
 class SavedImage {
-  final Uint8List thumbnail;  // original canvas thumbnail
-  final String prediction;       // model prediction
-  final Uint8List modelView;  // preprocessed input for display
+  final Uint8List thumbnail;       // original canvas thumbnail
+  final List<Detection> detections; // list of predicted symbols + bbox
+  final Uint8List modelView;       // preprocessed input for display (optional)
 
   SavedImage({
-    required this.thumbnail, 
-    required this.prediction, 
+    required this.thumbnail,
+    required this.detections,
     required this.modelView,
   });
 }
 
 // For verifying
 // Holds boundariy lines
+class Detection {
+  final String label;
+  final BoundingBox bbox;
+
+  Detection({
+    required this.label,
+    required this.bbox,
+  });
+}
+
 class BoundingBox {
-  int minX, minY, maxX, maxY;
+  final int minX, minY, maxX, maxY;
+
   BoundingBox(this.minX, this.minY, this.maxX, this.maxY);
+
+  int get width => maxX - minX;
+  int get height => maxY - minY;
 }
 
 class MainPage extends StatefulWidget {
@@ -258,7 +272,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
         setState(() {
           saved.add(SavedImage(
             thumbnail: thumbnail,
-            prediction: "",
+            detections: [],
             modelView: emptyModelView,
           ));
           _controller.clear();
@@ -313,7 +327,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
 
       // 3. Add to the list
       savedInputs.add(sample);
-      print('✅ Saved input with label $label. Total saved: ${savedInputs.length}');
+      print('Saved input with label $label. Total saved: ${savedInputs.length}');
 
 
     } catch (e) {
@@ -326,7 +340,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   Future<void> ultimateSave() async {
     try {
       if (savedInputs.isEmpty) {
-        print('ℹ️ No inputs to save');
+        print('No inputs to save');
         return;
       }
 
@@ -348,10 +362,10 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
             allInputs = decoded
                 .map((e) => SaveModelInput.fromJson(e as Map<String, dynamic>))
                 .toList();
-            print('📂 Loaded ${allInputs.length} existing inputs from file');
+            print('Loaded ${allInputs.length} existing inputs from file');
           }
         } catch (e) {
-          print('⚠️ Error loading existing data: $e');
+          print('Error loading existing data: $e');
         }
       }
 
@@ -362,14 +376,14 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
       final jsonStr = jsonEncode(allInputs.map((e) => e.toJson()).toList());
       await file.writeAsString(jsonStr);
 
-      print('✅ Saved ${savedInputs.length} new inputs. Total in file: ${allInputs.length}');
-      print('📍 File location: ${file.path}');
+      print('Saved ${savedInputs.length} new inputs. Total in file: ${allInputs.length}');
+      print('File location: ${file.path}');
 
       // Clear the in-memory list after successful save
       savedInputs.clear();
 
     } catch (e) {
-      print('❌ Error during ultimateSave: $e');
+      print('Error during ultimateSave: $e');
     }
   }
   
@@ -425,7 +439,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
         setState(() {
           saved.add(SavedImage(
             thumbnail: thumbnail,
-            prediction: "",
+            detections: [],
             modelView: emptyModelView,
           ));
           _controller.clear();
@@ -491,7 +505,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
       setState(() {
         saved.add(SavedImage(
           thumbnail: thumbnail,
-          prediction: predictedLabel,
+          detections: [],
           modelView: modelView,
         ));
         _controller.clear();
@@ -711,7 +725,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
         setState(() {
           saved.add(SavedImage(
             thumbnail: symbolThumbnail,
-            prediction: predictedLabel,
+            detections: [],
             modelView: modelView,
           ));
         });
@@ -1049,7 +1063,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                                 ),
                                 const SizedBox(height: 4,),
                                 Text(
-                                  'Prediction: ${item.prediction}',
+                                  'Prediction: ${item.detections}',
                                   style: const TextStyle(fontSize: 12),
                                   overflow: TextOverflow.ellipsis,
                                 ),
