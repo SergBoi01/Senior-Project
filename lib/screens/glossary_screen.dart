@@ -1,5 +1,3 @@
-// glossary_screen.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:scribble/scribble.dart';
@@ -49,7 +47,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     if (editingIndex != null && imageData != null) {
       setState(() {
         glossary.entries[editingIndex!].symbolImage = imageData;
-        glossary.entries[editingIndex!].symbol = "✓";
         showCanvas = false;
         editingIndex = null;
         editingColumn = null;
@@ -78,31 +75,42 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                 // Display existing symbol image
                 Image.memory(
                   entry.symbolImage!,
-                  width: 200,
-                  height: 200,
+                  width: 600,
+                  height: 400,
                   fit: BoxFit.contain,
                 ),
                 SizedBox(height: 16),
-                Text('What would you like to do?'),
+                Text(
+                  'What would you like to do?',
+                  style: TextStyle(fontSize: 18),
+                ),
               ],
             ),
+            actionsAlignment: MainAxisAlignment.spaceEvenly,
+            actionsPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             actions: [
               // Cancel button
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: Text('Cancel'),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.black,
+                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                ),
+                child: Text('Cancel', style: TextStyle(fontSize: 15)),
               ),
               // Delete symbol button
               TextButton(
                 onPressed: () {
                   setState(() {
                     entry.symbolImage = null; // Remove the image
-                    entry.symbol = ''; // Clear the symbol text
                   });
                   Navigator.pop(context);
                 },
-                style: TextButton.styleFrom(foregroundColor: Colors.red),
-                child: Text('Delete Symbol'),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.red,
+                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                ),
+                child: Text('Delete Symbol', style: TextStyle(fontSize: 15)),
               ),
               // Replace drawing button
               ElevatedButton(
@@ -115,7 +123,12 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                     showCanvas = true;
                   });
                 },
-                child: Text('Replace Drawing'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black,
+                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                ),
+                child: Text('Replace Drawing', style: TextStyle(fontSize: 15)),
               ),
             ],
           ),
@@ -238,10 +251,12 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   
   /// Adds a new empty entry to the glossary
   void _addNewEntry() {
-    setState(() {
-      glossary.addEntry('', '', '', '', '');
-    });
-  }
+  setState(() {
+    glossary.addEntry('', '', '', '');
+    print("ADDED NEW ENTRY:");
+    glossary.printAllEntries();
+  });
+}
 
   // Build Methods
   
@@ -298,7 +313,13 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                     // Delete button for each row
                     IconButton(
                       icon: Icon(Icons.delete, color: Colors.red),
-                      onPressed: () => setState(() => glossary.deleteEntry(index)),
+                      onPressed: () {
+                        setState(() {
+                          print("DELETING ENTRY AT INDEX $index:");
+                          glossary.deleteEntry(index);
+                          glossary.printAllEntries();
+                        });
+                      },
                     ),
                   ],
                 ),

@@ -5,7 +5,6 @@ class GlossaryEntry {
   String spanish;
   String definition;
   String synonym;  
-  String symbol;
   Uint8List? symbolImage; // for drawn symbols
 
   // Main constructor
@@ -14,12 +13,11 @@ class GlossaryEntry {
     required this.spanish,
     required this.definition,
     required this.synonym,
-    required this.symbol,
     this.symbolImage,
   });
 
-  // Short constructor for symbol/word initialization
-  GlossaryEntry.short({required this.symbol, required String word})
+  // Short constructor for word initialization
+  GlossaryEntry.short({required String word})
       : english = word,
         spanish = "",
         definition = "",
@@ -35,51 +33,50 @@ class Glossary {
 
   /// Default glossary entries
   final List<GlossaryEntry> _entries = [
-    GlossaryEntry.short(symbol: "@", word: "at"),
-    GlossaryEntry.short(symbol: "&", word: "and"),
-    GlossaryEntry.short(symbol: "#", word: "number"),
-    GlossaryEntry.short(symbol: "%", word: "percent"),
-    GlossaryEntry.short(symbol: "\$", word: "dollar"),
-    GlossaryEntry.short(symbol: "*", word: "star"),
-    GlossaryEntry.short(symbol: "ℹ", word: "Information"),
-    GlossaryEntry.short(symbol: "?", word: "Help"),
-    GlossaryEntry.short(symbol: "!", word: "Warning"),
-    GlossaryEntry.short(symbol: "✓", word: "Check"),
-    GlossaryEntry.short(symbol: "⚠", word: "Violence"),
-    GlossaryEntry.short(symbol: "🚫", word: "No"),
+    GlossaryEntry.short(word: "at"),
+    GlossaryEntry.short(word: "and"),
+    GlossaryEntry.short(word: "number"),
+    GlossaryEntry.short(word: "percent"),
+    GlossaryEntry.short(word: "dollar"),
+    GlossaryEntry.short(word: "star"),
+    GlossaryEntry.short(word: "Information"),
+    GlossaryEntry.short(word: "Help"),
+    GlossaryEntry.short(word: "Warning"),
+    GlossaryEntry.short(word: "Check"),
+    GlossaryEntry.short(word: "Violence"),
+    GlossaryEntry.short(word: "No"),
   ];
 
   /// Expose entries list (read-only reference)
   List<GlossaryEntry> get entries => _entries;
 
   // Add entry
- void addEntry(String english, String spanish, String definition, String synonym, String symbol, [Uint8List? symbolImage]) {
-  _entries.add(GlossaryEntry(
-    english: english,
-    spanish: spanish,
-    definition: definition,
-    synonym: synonym,
-    symbol: symbol,
-    symbolImage: symbolImage,
-  ));
-}
-// Update entry
-void updateEntry(int index, String english, String spanish, String definition, String synonym, String symbol, [Uint8List? symbolImage]) {
-  if (index >= 0 && index < _entries.length) {
-    _entries[index].english = english;
-    _entries[index].spanish = spanish;
-    _entries[index].definition = definition;
-    _entries[index].synonym = synonym;
-    _entries[index].symbol = symbol;
-    if (symbolImage != null) {
-      _entries[index].symbolImage = symbolImage;
+  void addEntry(String english, String spanish, String definition, String synonym, [Uint8List? symbolImage]) {
+    _entries.add(GlossaryEntry(
+      english: english,
+      spanish: spanish,
+      definition: definition,
+      synonym: synonym,
+      symbolImage: symbolImage,
+    ));
+  }
+  
+  // Update entry
+  void updateEntry(int index, String english, String spanish, String definition, String synonym, [Uint8List? symbolImage]) {
+    if (index >= 0 && index < _entries.length) {
+      _entries[index].english = english;
+      _entries[index].spanish = spanish;
+      _entries[index].definition = definition;
+      _entries[index].synonym = synonym;
+      if (symbolImage != null) {
+        _entries[index].symbolImage = symbolImage;
+      }
     }
   }
-}
 
-  /// Optional short add for symbol/word pairs
-  void addShort(String symbol, String word) {
-    _entries.add(GlossaryEntry.short(symbol: symbol, word: word));
+  /// Optional short add for word
+  void addShort(String word) {
+    _entries.add(GlossaryEntry.short(word: word));
   }
 
   /// Delete entry by index
@@ -92,5 +89,14 @@ void updateEntry(int index, String english, String spanish, String definition, S
   /// Clear all entries (optional helper)
   void clear() {
     _entries.clear();
+  }
+
+  /// Print all entries for testing
+  void printAllEntries() {
+    print("========== GLOSSARY LIST (${_entries.length} entries) ==========");
+    for (int i = 0; i < _entries.length; i++) {
+      print("[$i] English: '${_entries[i].english}' | Spanish: '${_entries[i].spanish}' | Has Image: ${_entries[i].symbolImage != null}");
+    }
+    print("==========================================================");
   }
 }
