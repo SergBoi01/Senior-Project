@@ -60,35 +60,12 @@ class Glossary {
       symbolImage: symbolImage,
     ));
   }
-  
-  // Update entry
-  void updateEntry(int index, String english, String spanish, String definition, String synonym, [Uint8List? symbolImage]) {
-    if (index >= 0 && index < _entries.length) {
-      _entries[index].english = english;
-      _entries[index].spanish = spanish;
-      _entries[index].definition = definition;
-      _entries[index].synonym = synonym;
-      if (symbolImage != null) {
-        _entries[index].symbolImage = symbolImage;
-      }
-    }
-  }
-
-  /// Optional short add for word
-  void addShort(String word) {
-    _entries.add(GlossaryEntry.short(word: word));
-  }
 
   /// Delete entry by index
   void deleteEntry(int index) {
     if (index >= 0 && index < _entries.length) {
       _entries.removeAt(index);
     }
-  }
-
-  /// Clear all entries (optional helper)
-  void clear() {
-    _entries.clear();
   }
 
   /// Print all entries for testing

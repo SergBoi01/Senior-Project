@@ -14,7 +14,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   // State Variables
   final Glossary glossary = Glossary();
   int? editingIndex; // Currently editing row index
-  int? editingColumn; // 0=Eng, 1=Span, 2=Def, 3=Syn, 4=Symbol
   bool showCanvas = false; // Toggle between table view and canvas view
   
   // Canvas/Drawing controllers
@@ -49,7 +48,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
         glossary.entries[editingIndex!].symbolImage = imageData;
         showCanvas = false;
         editingIndex = null;
-        editingColumn = null;
       });
       _notifier.clear();
     }
@@ -119,7 +117,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                   // Open canvas to draw new symbol
                   setState(() {
                     editingIndex = rowIndex;
-                    editingColumn = columnIndex;
                     showCanvas = true;
                   });
                 },
@@ -137,7 +134,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
         // No symbol yet, open canvas directly
         setState(() {
           editingIndex = rowIndex;
-          editingColumn = columnIndex;
           showCanvas = true;
         });
       }
@@ -464,7 +460,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                   setState(() {
                     showCanvas = false;
                     editingIndex = null;
-                    editingColumn = null;
                   });
                   _notifier.clear();
                 },
