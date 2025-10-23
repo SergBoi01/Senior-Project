@@ -3,7 +3,7 @@ import 'package:flutter/rendering.dart';
 import 'package:scribble/scribble.dart';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
-import 'glossary.dart';
+import 'glossary_backend.dart';
 
 class GlossaryScreen extends StatefulWidget {
   @override

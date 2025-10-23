@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:senior_project/screens/glossary_screen.dart';
+import 'package:senior_project/screens/glossary_frontend.dart';
 import 'package:senior_project/screens/login_screen.dart';
 import 'package:senior_project/screens/symbols_screen.dart';
 
@@ -18,7 +18,6 @@ class MainPage extends StatefulWidget {
 class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin {
   
   late AnimationController _animationController;
-  bool isMenuOpen = false;
   final ScribbleNotifier _notifier = ScribbleNotifier();
   final GlobalKey _repaintKey = GlobalKey();
 
@@ -65,19 +64,6 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     super.dispose();
   }
 
-  
-  void _toggleMenu() {
-    if (isMenuOpen) {
-      _animationController.reverse();
-      Scaffold.of(context).openDrawer();
-    } else {
-      _animationController.forward();
-      Scaffold.of(context).openDrawer();
-    }
-    setState(() {
-      isMenuOpen = !isMenuOpen;
-    });
-  }
 
   @override
   Widget build(BuildContext context) {

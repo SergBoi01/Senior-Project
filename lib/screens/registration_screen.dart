@@ -24,7 +24,7 @@ void _register() async {
 
   try {
   // Create user account with Firebase
-  UserCredential userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+  await FirebaseAuth.instance.createUserWithEmailAndPassword(
     email: _emailController.text.trim(),
     password: _passwordController.text,
   );
