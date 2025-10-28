@@ -1,4 +1,6 @@
 import 'dart:typed_data';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 class GlossaryEntry {
   String english;
@@ -65,6 +67,58 @@ class Glossary {
   void deleteEntry(int index) {
     if (index >= 0 && index < _entries.length) {
       _entries.removeAt(index);
+    }
+  }
+
+  /// Save glossary to SharedPreferences
+  Future<void> saveToPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      List<String> entries = [];
+      
+      for (var entry in _entries) {
+        String entryJson = jsonEncode({
+          'english': entry.english,
+          'spanish': entry.spanish,
+          'definition': entry.definition,
+          'synonym': entry.synonym,
+          'hasSymbol': entry.symbolImage != null,
+          'symbolImage': entry.symbolImage != null ? base64Encode(entry.symbolImage!) : null,
+        });
+        entries.add(entryJson);
+      }
+      
+      await prefs.setStringList('glossary_entries', entries);
+      print('Glossary saved successfully');
+    } catch (e) {
+      print('Error saving glossary: $e');
+    }
+  }
+
+  /// Load glossary from SharedPreferences
+  Future<void> loadFromPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      List<String>? entries = prefs.getStringList('glossary_entries');
+      
+      if (entries != null && entries.isNotEmpty) {
+        _entries.clear();
+        for (String entryJson in entries) {
+          Map<String, dynamic> data = jsonDecode(entryJson);
+          _entries.add(GlossaryEntry(
+            english: data['english'] ?? '',
+            spanish: data['spanish'] ?? '',
+            definition: data['definition'] ?? '',
+            synonym: data['synonym'] ?? '',
+            symbolImage: data['symbolImage'] != null ? base64Decode(data['symbolImage']) : null,
+          ));
+        }
+        print('Glossary loaded successfully');
+      } else {
+        print('No saved glossary found, using defaults');
+      }
+    } catch (e) {
+      print('Error loading glossary: $e');
     }
   }
 

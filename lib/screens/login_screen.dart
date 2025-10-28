@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:senior_project/screens/main_page.dart';
 import 'package:senior_project/screens/registration_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:senior_project/screens/glossary_backend.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -32,6 +33,9 @@ class _LoginScreenState extends State<LoginScreen> {
       email: email,
       password: password,
     );
+
+    // Load saved glossary data
+    await Glossary().loadFromPrefs();
     
     Navigator.pushReplacement(
       context,

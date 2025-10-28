@@ -19,6 +19,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   // Canvas/Drawing controllers
   final ScribbleNotifier _notifier = ScribbleNotifier();
   final GlobalKey _canvasKey = GlobalKey();
+  final ScrollController _scrollController = ScrollController();
   
   // Text input controller for editing cells
   final TextEditingController _editController = TextEditingController();
@@ -229,6 +230,8 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                       break;
                   }
                 });
+                // Auto save after editing
+                glossary.saveToPrefs();
                 Navigator.pop(context);
               },
               style: ElevatedButton.styleFrom(
@@ -252,7 +255,20 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     print("ADDED NEW ENTRY:");
     glossary.printAllEntries();
   });
-}
+  // Auto save after adding
+  glossary.saveToPrefs();
+
+  // Scroll to the bottom of the list to show the newly added entry
+    Future.delayed(Duration(milliseconds: 100), () {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
 
   // Build Methods
   
@@ -291,6 +307,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
         // Data Rows
         Expanded(
           child: ListView.builder(
+            controller: _scrollController,
             itemCount: glossary.entries.length,
             itemBuilder: (context, index) {
               final entry = glossary.entries[index];
@@ -315,6 +332,8 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                           glossary.deleteEntry(index);
                           glossary.printAllEntries();
                         });
+                        // Auto save after deleting
+                        glossary.saveToPrefs();
                       },
                     ),
                   ],
@@ -480,5 +499,13 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
         ),
       ],
     );
+  }
+
+  @override
+  void dispose() {
+    // Clean up controllers
+    _scrollController.dispose();
+    _editController.dispose();
+    super.dispose();
   }
 }

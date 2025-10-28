@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:senior_project/screens/glossary_frontend.dart';
 import 'package:senior_project/screens/login_screen.dart';
 import 'package:senior_project/screens/symbols_screen.dart';
+import 'package:senior_project/screens/glossary_backend.dart';
 
 import 'package:scribble/scribble.dart';
 import 'package:flutter/rendering.dart';
@@ -146,10 +147,12 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
             ),
             const Spacer(),
             const Divider(color: Colors.white),
+
             ListTile(
               leading: const Icon(Icons.logout, color: Colors.white),
               title: const Text('Logout', style: TextStyle(color: Colors.white)),
-              onTap: () {
+              onTap: () async {
+                await Glossary().saveToPrefs();
                 Navigator.pop(context);
                 Navigator.pushReplacement(
                   context,
