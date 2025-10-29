@@ -7,108 +7,35 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:image/image.dart' as img;
 import 'package:scribble/scribble.dart';
 import 'dart:typed_data';
-import 'dart:math';
-import 'dart:ui' as ui;
 import 'dart:async';
-import 'dart:io';
-import 'dart:convert';
+import 'dart:math' as math;
 
-// This code can be divided INTO gathering training data for model AND verifying model prediction, ModelView
 
-// For gathering
-// TO SEE SAVED TXT FILE OF LIST INPUTS. 
-// RUN PROGRAM THEN ON POWERSHELL VSCODE TERMINAL COPY 
-// adb pull /storage/emulated/0/Download/saved_symbol_data.txt C:\Users\Kirit\Downloads\
+// Saves Label, ConfidenceScore, Coordinates, Thumbnail of Image
+// Class to hold all information for each detected symbol
+class DetectedSymbol {
+  final String label;           // The symbol ("A", "l_z")
+  final double confidence;      // Confidence score (0.0 to 1.0)
+  final int x1, y1, x2, y2;    // Bounding box coordinates
+  final Uint8List? thumbnail;   // Cropped image of the symbol
 
-// For gathering
-// Saves input and label needed to train a model and save to seperate file
-// Called save input/label and save to file to save in between runs
-class SaveModelInput {
-  final List<List<List<List<double>>>> input;  // preprocessed input for display4
-  final String label;
-
-  SaveModelInput({
-    required this.input, 
+  DetectedSymbol({
     required this.label,
+    required this.confidence,
+    required this.x1,
+    required this.y1,
+    required this.x2,
+    required this.y2,
+    this.thumbnail,
   });
 
-  Map<String, dynamic> toJson() => {
-        'input': input,
-        'label': label,
-      };
-
-  /// Build SaveModelInput from decoded JSON (dynamic nested lists).
-  factory SaveModelInput.fromJson(Map<String, dynamic> json) {
-    final rawInput = json['input'];
-    if (rawInput == null) {
-      throw FormatException('Missing "input" in JSON');
-    }
-
-    return SaveModelInput(
-      input: _convertTo4DDoubleList(rawInput),
-      label: json['label'] as String,
-    );
-  }
-
-  /// Helper to convert dynamic nested lists to List<List<List<List<double>>>>
-  static List<List<List<List<double>>>> _convertTo4DDoubleList(dynamic raw) {
-    // Expect raw to be List (level 0)
-    final List outer = raw as List;
-
-    return outer.map<List<List<List<double>>>>((lvl1) {
-      final List l1 = lvl1 as List;
-      return l1.map<List<List<double>>>((lvl2) {
-        final List l2 = lvl2 as List;
-        return l2.map<List<double>>((lvl3) {
-          final List l3 = lvl3 as List;
-          return l3.map<double>((v) {
-            // JSON numbers can be int or double -> cast to num then toDouble()
-            if (v == null) return 0.0;
-            if (v is num) return v.toDouble();
-            // if it's a string, try parse (robustness)
-            if (v is String) return double.tryParse(v) ?? 0.0;
-            throw FormatException('Unexpected value type in input tensor: ${v.runtimeType}');
-          }).toList();
-        }).toList();
-      }).toList();
-    }).toList();
-  }
-}
-
-// For verifying
-// Saves thumbnail, model prediction, and modelView to display on the right-hand side
-// Called to verify the model it predicting and seeing input correctly
-class SavedImage {
-  final Uint8List thumbnail;       // original canvas thumbnail
-  final List<Detection> detections; // list of predicted symbols + bbox
-  final Uint8List modelView;       // preprocessed input for display (optional)
-
-  SavedImage({
-    required this.thumbnail,
-    required this.detections,
-    required this.modelView,
-  });
-}
-
-// For verifying
-// Holds boundariy lines
-class Detection {
-  final String label;
-  final BoundingBox bbox;
-
-  Detection({
-    required this.label,
-    required this.bbox,
-  });
-}
-
-class BoundingBox {
-  final int minX, minY, maxX, maxY;
-
-  BoundingBox(this.minX, this.minY, this.maxX, this.maxY);
-
-  int get width => maxX - minX;
-  int get height => maxY - minY;
+  // Helper to get bbox center
+  double get centerX => (x1 + x2) / 2;
+  double get centerY => (y1 + y2) / 2;
+  
+  // Helper to get bbox dimensions
+  int get width => x2 - x1;
+  int get height => y2 - y1;
 }
 
 class MainPage extends StatefulWidget {
@@ -120,649 +47,237 @@ class MainPage extends StatefulWidget {
 
 class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin {
   
-  ///////////////////////////////////////////////////////////////////////////////
-  /// ALWAYS
+  // Model constants
+  static const int INPUT_SIZE = 128;
+  static const int MAX_DETECTIONS = 20;
+  static const int NUM_CLASSES = 52;
+  // static const double CONFIDENCE_THRESHOLD = 0.3;
+  static const double CONFIDENCE_THRESHOLD = 0.50;
+  
+  // Model Interpreter
+  late Interpreter interpreter;
 
-  // Always stays
-  // Change thickness/color of pen in canvas
+  // List that hold info for EACH symbol
+  List<DetectedSymbol> detectedSymbols = [];
+
+  // Lables list l_a - l_z and A - Z
+  final List<String> labels = [
+    ...List.generate(26, (i) => 'l_${String.fromCharCode(97 + i)}'), // l_a to l_z
+    ...List.generate(26, (i) => String.fromCharCode(65 + i)),        // A to Z
+  ];
+
+  // Canvas pen settings
   final ScribbleNotifier _controller = ScribbleNotifier()
   ..setStrokeWidth(10.0)  
   ..setColor(Colors.black);
 
-  // Always stays
-  late Interpreter interpreter;
-
-  // UI ITEMS
+  // UI Variables
   late AnimationController _animationController;
   bool isMenuOpen = false;
 
-  // Always stays
+  // -------------------------- FUNCTIONS START --------------------------//
+
+  // Loads model
   Future<void> _loadModel() async {
-    // Dependings on the model I want to run
-    interpreter = await Interpreter.fromAsset('assets/models/alphabet_25_50_trained.tflite');
-    print('Interpreter initialized: $interpreter');
-  }
-
-  // adds timer to check symbols automatically 
-  Timer? _autoProcessTimer;
-  bool _isProcessing = false; // Prevent overlapping calls
-  // functions for automatic symbol check
-  void _startAutoProcessing() {
-    _autoProcessTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
-      if (!_isProcessing) {
-        _isProcessing = true;
-        await multiple();
-        _isProcessing = false;
-      }
-    });
-  }
-  void _stopAutoProcessing() {
-    _autoProcessTimer?.cancel();
-    _autoProcessTimer = null;
-  }
-  
-  ////GATHERING///////////////////////////////////////////////////////////////////////////
-  /// GATHERING
-  
-  // For gathering
-  // Created to hold list of model inputs from user
-  List<SaveModelInput> savedInputs = [];
-
-  // For gathering
-  // Labels for Alphabet_25 model
-  final List<String> labels = [
-    'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z',
-    'a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z',
-  ];
-
-  // Loops List<String> labels
-  int round = 0; // completed rounds. is updated manually every run
-  int index = 0; // current label index
-  String getNextLabel() {
-    String label = labels[index];
-    print('Index : $index out of 52' );
-    index++;
-    if (index >= labels.length) {
-      index = 0;
-      round++;
-      print('$round round completed out of 50');
-    }
-    return label;
-  }
-  String? currentLabel;
-
-  // For gathering
-  // Load previously saved training data from the emulator file into app memory
-  Future<void> loadSavedData() async {
     try {
-      final directory = Directory('/storage/emulated/0/Download');
-      final file = File('${directory.path}/saved_data.txt');
-
-      // Uncomment this to clear the file (use carefully!)
-      // await file.writeAsString('');
-      // print('🗑️ Cleared saved_data.txt');
-      // return;
-
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        if (content.isNotEmpty) {
-          final List<dynamic> decoded = jsonDecode(content);
-          final loaded = decoded
-              .map((e) => SaveModelInput.fromJson(e as Map<String, dynamic>))
-              .toList();
-
-          // Don't overwrite savedInputs on load - it's for accumulating new data
-          // savedInputs = loaded;  // DON'T do this
-
-          print('📂 File contains ${loaded.length} saved inputs');
-          print('📍 File location: ${file.path}');
-        } else {
-          print('ℹ️ Saved file exists but is empty');
-        }
-      } else {
-        print('ℹ️ No saved data file found at ${file.path}');
-      }
+      interpreter = await Interpreter.fromAsset('assets/models/symbol_detector.tflite');
+      print('Model loaded successfully');
+      print('Input shape: ${interpreter.getInputTensor(0).shape}');
+      print('Output shape: ${interpreter.getOutputTensor(0).shape}');
     } catch (e) {
-      print('❌ Error during loadSavedData: $e');
-    }
-  }
-  
-  // For gathering
-  // Preprocess drawing, 
-  // Saves in List<SaveModelInput> savedInputs
-  Future<void> _saveModelInputList(String label) async {
-    try {
-      print(interpreter.hashCode);
-      // 1. Render canvas as ByteData
-      final ByteData byteData = await _controller.renderImage();
-      final Uint8List thumbnail = byteData.buffer.asUint8List();
-
-      // 2. Decode PNG for processing
-      final img.Image? image = img.decodeImage(thumbnail);
-      if (image == null) return;
-
-      final int width = image.width;
-      final int height = image.height;
-
-      // 3. Find bounding box of non-white pixels
-      int minX = width, minY = height, maxX = 0, maxY = 0;
-      bool hasContent = false;
-
-      for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-        final pixel = image.getPixel(x, y);
-        final int r = pixel.r.toInt();
-        final int g = pixel.g.toInt();
-        final int b = pixel.b.toInt();
-        final gray = (0.299*r + 0.587*g + 0.114*b).toInt();
-
-        if (gray < 240) { // non-white pixel
-          hasContent = true;
-          minX = x < minX ? x : minX;
-          minY = y < minY ? y : minY;
-          maxX = x > maxX ? x : maxX;
-          maxY = y > maxY ? y : maxY;
-          }
-        }
-      }
-
-      // 4. Handle empty canvas
-      if (!hasContent) {
-        final emptyModelView = _createEmptyModelView();
-        setState(() {
-          saved.add(SavedImage(
-            thumbnail: thumbnail,
-            detections: [],
-            modelView: emptyModelView,
-          ));
-          _controller.clear();
-        });
-        return;
-      }
-
-      // 5. Crop to bounding box with some padding
-      final padding = 5;
-      final cropMinX = max(0, minX - padding);
-      final cropMinY = max(0, minY - padding);
-      final cropMaxX = min(width - 1, maxX + padding);
-      final cropMaxY = min(height - 1, maxY + padding);
-      
-      final cropped = img.copyCrop(
-        image,
-        x: cropMinX,
-        y: cropMinY,
-        width: cropMaxX - cropMinX + 1,
-        height: cropMaxY - cropMinY + 1,
-      );
-
-      // 6. Resize while preserving aspect ratio to fit 20x20
-      final scale = 20 / max(cropped.width, cropped.height);
-      final newWidth = (cropped.width * scale).round();
-      final newHeight = (cropped.height * scale).round();
-      final resized = img.copyResize(cropped, width: newWidth, height: newHeight);
-
-      // 7. Center on 28x28 black canvas
-      final canvas28 = img.Image(width: 28, height: 28);
-      img.fill(canvas28, color: img.ColorRgb8(255, 255, 255));
-      final xOffset = ((28 - newWidth) / 2).round();
-      final yOffset = ((28 - newHeight) / 2).round();
-      img.compositeImage(canvas28, resized, dstX: xOffset, dstY: yOffset);
-
-      // 8. Convert to [1,28,28,1] with inverted grayscale
-      final processedInput = List.generate(1, (_) => List.generate(28, (y) {
-        return List.generate(28, (x) {
-          final pixel = canvas28.getPixel(x, y);
-          final gray = (0.299*pixel.r + 0.587*pixel.g + 0.114*pixel.b)/255.0;
-          return [1 - gray]; // invert: black background → 0, white strokes → 1
-        });
-      }));
-
-      // 2. Save and clear     
-      final sample = SaveModelInput(
-        input: processedInput,
-        label: label,
-      );
-      _controller.clear();
-
-
-      // 3. Add to the list
-      savedInputs.add(sample);
-      print('Saved input with label $label. Total saved: ${savedInputs.length}');
-
-
-    } catch (e) {
-      print('Error in _handleSave: $e');
+      print('Error loading model: $e');
     }
   }
 
-  // For gathering
-  // Saves all items in List<SaveModelInput> savedInputs to an emulator file and clear current list
-  Future<void> ultimateSave() async {
-    try {
-      if (savedInputs.isEmpty) {
-        print('No inputs to save');
-        return;
-      }
-
-      // Path to the Download folder in the emulator
-      final directory = Directory('/storage/emulated/0/Download');
-      if (!await directory.exists()) {
-        await directory.create(recursive: true);
-      }
-
-      final file = File('${directory.path}/saved_data.txt');
-
-      // Load existing data if file exists
-      List<SaveModelInput> allInputs = [];
-      if (await file.exists()) {
-        try {
-          final content = await file.readAsString();
-          if (content.isNotEmpty) {
-            final List<dynamic> decoded = jsonDecode(content);
-            allInputs = decoded
-                .map((e) => SaveModelInput.fromJson(e as Map<String, dynamic>))
-                .toList();
-            print('Loaded ${allInputs.length} existing inputs from file');
-          }
-        } catch (e) {
-          print('Error loading existing data: $e');
-        }
-      }
-
-      // Add new inputs to existing data
-      allInputs.addAll(savedInputs);
-
-      // Convert all data to JSON and save
-      final jsonStr = jsonEncode(allInputs.map((e) => e.toJson()).toList());
-      await file.writeAsString(jsonStr);
-
-      print('Saved ${savedInputs.length} new inputs. Total in file: ${allInputs.length}');
-      print('File location: ${file.path}');
-
-      // Clear the in-memory list after successful save
-      savedInputs.clear();
-
-    } catch (e) {
-      print('Error during ultimateSave: $e');
-    }
-  }
-  
-  ///////////////////////////////////////////////////////////////////////////////
-  /// VERIFYING - WORKS
-  
-  // For verifying
-  // Created to hold list of process symbols from user with prediction - for right right
-  final List<SavedImage> saved = [];
-
-  // For verifying
-  // Preprocess drawing, runs model, 
-  // Saves prediction in List<SavedImage> saved - for right side
-  Future<void> _handleSave () async {
-    try {
-      print(interpreter.hashCode);
-      // 1. Render canvas as ByteData
-      final ByteData byteData = await _controller.renderImage();
-      final Uint8List thumbnail = byteData.buffer.asUint8List();
-
-      // 2. Decode PNG for processing
-      final img.Image? image = img.decodeImage(thumbnail);
-      if (image == null) return;
-
-      final int width = image.width;
-      final int height = image.height;
-
-      // 3. Find bounding box of non-white pixels
-      int minX = width, minY = height, maxX = 0, maxY = 0;
-      bool hasContent = false;
-
-      for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-        final pixel = image.getPixel(x, y);
-        final int r = pixel.r.toInt();
-        final int g = pixel.g.toInt();
-        final int b = pixel.b.toInt();
-        final gray = (0.299*r + 0.587*g + 0.114*b).toInt();
-
-        if (gray < 240) { // non-white pixel
-          hasContent = true;
-          minX = x < minX ? x : minX;
-          minY = y < minY ? y : minY;
-          maxX = x > maxX ? x : maxX;
-          maxY = y > maxY ? y : maxY;
-          }
-        }
-      }
-
-      // 4. Handle empty canvas
-      if (!hasContent) {
-        final emptyModelView = _createEmptyModelView();
-        setState(() {
-          saved.add(SavedImage(
-            thumbnail: thumbnail,
-            detections: [],
-            modelView: emptyModelView,
-          ));
-          _controller.clear();
-        });
-        return;
-      }
-
-      // 5. Crop to bounding box with some padding
-      final padding = 5;
-      final cropMinX = max(0, minX - padding);
-      final cropMinY = max(0, minY - padding);
-      final cropMaxX = min(width - 1, maxX + padding);
-      final cropMaxY = min(height - 1, maxY + padding);
-      
-      final cropped = img.copyCrop(
-        image,
-        x: cropMinX,
-        y: cropMinY,
-        width: cropMaxX - cropMinX + 1,
-        height: cropMaxY - cropMinY + 1,
-      );
-      
-
-      // 6. Resize while preserving aspect ratio to fit 20x20
-      final scale = 20 / max(cropped.width, cropped.height);
-      final newWidth = (cropped.width * scale).round();
-      final newHeight = (cropped.height * scale).round();
-      final resized = img.copyResize(cropped, width: newWidth, height: newHeight);
-
-      // 7. Center on 28x28 black canvas
-      final canvas28 = img.Image(width: 28, height: 28);
-      img.fill(canvas28, color: img.ColorRgb8(255, 255, 255));
-      final xOffset = ((28 - newWidth) / 2).round();
-      final yOffset = ((28 - newHeight) / 2).round();
-      img.compositeImage(canvas28, resized, dstX: xOffset, dstY: yOffset);
-
-      // 8. Convert to [1,28,28,1] with inverted grayscale
-      final input = List.generate(1, (_) => List.generate(28, (y) {
-        return List.generate(28, (x) {
-          final pixel = canvas28.getPixel(x, y);
-          final gray = (0.299*pixel.r + 0.587*pixel.g + 0.114*pixel.b)/255.0;
-          return [1 - gray]; // invert: black background → 0, white strokes → 1
-        });
-      }));
-
-      // 9. Run TFLite
-      var output = List.generate(1, (_) => List.filled(52, 0.0));
-      interpreter.run(input, output);
-
-      // Find index of highest probability
-      final outputList = output[0];
-      final maxIndex = outputList.indexWhere(
-        (v) => v == outputList.reduce((a, b) => a > b ? a : b),
-      );
-
-      // Get the corresponding label
-      final predictedLabel = labels[maxIndex];
-
-      // 11. Convert preprocessed input to image for display
-      Uint8List modelView = modelInputToImage(input);
-      
-      // 12. Save and clear
-      setState(() {
-        saved.add(SavedImage(
-          thumbnail: thumbnail,
-          detections: [],
-          modelView: modelView,
-        ));
-        _controller.clear();
-      });
-
-      print('Predicted digit: $predictedLabel');
-
-    } catch (e) {
-      print('Error in _handleSave: $e');
-    }
-  }
-
-  // For verifying
-  // Lets the testers/creaters see what the model is seeing
-  Uint8List modelInputToImage(List<List<List<List<double>>>> input) {
-    // Create a 28x28 grayscale image
-    final im = img.Image(width: 28, height: 28);
-
-    for (int y = 0; y < 28; y++) {
-      for (int x = 0; x < 28; x++) {
-        // Retrieve the inverted grayscale value used by the model
-        final val = input[0][y][x][0]; // 0..1
-        final gray = ((1.0 - val) * 255).toInt(); // 1→0 (black), 0→255 (white)
-
-        // Clamp to valid range
-        final clampedGray = gray.clamp(0, 255);
-
-      // Set pixel
-      im.setPixelRgba(x, y, clampedGray, clampedGray, clampedGray, 255);
-      }
-    }
-
-    // Encode as PNG for display
-    return Uint8List.fromList(img.encodePng(im));
-  }
-
-  // For both
-  // Called to creates an empty 28x28 canvas
-  // Helper for functions: _handleSave and _saveModelInputList
-  Uint8List _createEmptyModelView() {
-    final im = img.Image(width: 28, height: 28);
-    img.fill(im, color: img.ColorRgb8(255, 255, 255)); // White for empty
-    return Uint8List.fromList(img.encodePng(im));
-  }
-
-  ///////////////////////////////////////////////////////////////////////////////
-  /// VERIFYING MULTIPLE INPUTS CANVAS- TESTING
-  
-  // For verifying
-  // Turns entire canvas Uint8List
-  Future<Uint8List> getCanvasBytes(ui.Image image) async {
-    final byteData = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
-    return byteData!.buffer.asUint8List();
-  }
-  
-  // For verifying
-  // BFS through canvas to make bound boxes in symbols
-  List<BoundingBox> detectSymbols(Uint8List rgba, int width, int height) {
-    final visited = List<bool>.filled(width * height, false);
-    final boxes = <BoundingBox>[];
-
-    bool isBlack(int x, int y) {
-      final i = (y * width + x) * 4;
-      final r = rgba[i], g = rgba[i + 1], b = rgba[i + 2], a = rgba[i + 3];
-      // Treat opaque dark pixels as “black”
-      return a > 0 && (r < 50 && g < 50 && b < 50);
-    }
-
-    void floodFill(int startX, int startY) {
-      final stack = <List<int>>[];
-      stack.add([startX, startY]);
-      visited[startY * width + startX] = true;
-
-      int minX = startX, maxX = startX;
-      int minY = startY, maxY = startY;
-
-      while (stack.isNotEmpty) {
-        final point = stack.removeLast();
-        final x = point[0], y = point[1];
-
-        // Track bounding box
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-
-        for (var dx = -1; dx <= 1; dx++) {
-          for (var dy = -1; dy <= 1; dy++) {
-            if (dx == 0 && dy == 0) continue;
-            final nx = x + dx, ny = y + dy;
-            if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
-            final idx = ny * width + nx;
-            if (!visited[idx] && isBlack(nx, ny)) {
-              visited[idx] = true;
-              stack.add([nx, ny]);
-            }
-          }
-        }
-      }
-
-      boxes.add(BoundingBox(minX, minY, maxX, maxY));
-    }
-
-    for (int y = 0; y < height; y++) {
-      for (int x = 0; x < width; x++) {
-        final idx = y * width + x;
-        if (!visited[idx] && isBlack(x, y)) {
-          floodFill(x, y);
-        }
-      }
-    }
-
-    return boxes;
-  }
-  
-  // For verifying
-  // Goes through List<BoundingBox>, preprocess, runs model
+  // Preprocesses ENTIRE canvas, feeds to model, save detections to Detected list for output
   Future<void> multiple() async {
     try {
-      // Step 1: Render canvas to ui.Image
+      // Step 1: Get canvas as image
       final ByteData byteData = await _controller.renderImage();
       final Uint8List pngBytes = byteData.buffer.asUint8List();
-      
-      // Decode to get dimensions
-      final ui.Codec codec = await ui.instantiateImageCodec(pngBytes);
-      final ui.FrameInfo frameInfo = await codec.getNextFrame();
-      final ui.Image uiImage = frameInfo.image;
-
-      // Step 2: Convert to raw RGBA bytes
-      final Uint8List rgba = await getCanvasBytes(uiImage);
-      
-      // Step 3: Detect all symbol bounding boxes
-      final List<BoundingBox> boxes = detectSymbols(rgba, uiImage.width, uiImage.height);
-      print('Detected ${boxes.length} symbols');
-
-      if (boxes.isEmpty) {
-        print('No symbols detected on canvas');
-        return;
-      }
-
-      // Step 4: Decode PNG for image processing
       final img.Image? fullImage = img.decodeImage(pngBytes);
-      if (fullImage == null) {
-        print('Failed to decode canvas image');
+      if (fullImage == null) return;
+
+      // Step 2: Check if canvas is empty
+      bool hasContent = false;
+      outerLoop: for (int y = 0; y < fullImage.height; y++) {
+        for (int x = 0; x < fullImage.width; x++) {
+          final pixel = fullImage.getPixel(x, y);
+          final gray = (0.299 * pixel.r + 0.587 * pixel.g + 0.114 * pixel.b).toInt();
+          if (gray < 240) {
+            hasContent = true;
+            break outerLoop;
+          }
+        }
+      }
+      if (!hasContent) {
+        // Canvas is empty, clear detections
+        if (detectedSymbols.isNotEmpty) {
+          setState(() {
+            detectedSymbols.clear();
+          });
+        }
         return;
       }
 
-      // Step 5: Process each detected symbol
-      for (int i = 0; i < boxes.length; i++) {
-        final box = boxes[i];
-        print('Processing symbol ${i + 1}/${boxes.length}');
+      // Step 3: Preprocess image to 128x128 grayscale normalized
+      final grayscale = img.grayscale(fullImage);
+      final resized = img.copyResize(grayscale, width: INPUT_SIZE, height: INPUT_SIZE);
 
-        // Skip if box is too small (noise)
-        final boxWidth = box.maxX - box.minX + 1;
-        final boxHeight = box.maxY - box.minY + 1;
-        if (boxWidth < 5 || boxHeight < 5) {
-          print('Skipping small box: ${boxWidth}x${boxHeight}');
-          continue;
-        }
+      // Convert to model input format: [1, 128, 128, 1]
+      final input = List.generate(1, (_) =>
+        List.generate(INPUT_SIZE, (y) =>
+          List.generate(INPUT_SIZE, (x) {
+            final pixel = resized.getPixel(x, y);
+            return [pixel.r.toDouble() / 255.0];
+          })
+        )
+      );
 
-        // Crop to bounding box with padding
-        final padding = 5;
-        final cropMinX = max(0, box.minX - padding);
-        final cropMinY = max(0, box.minY - padding);
-        final cropMaxX = min(fullImage.width - 1, box.maxX + padding);
-        final cropMaxY = min(fullImage.height - 1, box.maxY + padding);
-        
-        final cropped = img.copyCrop(
-          fullImage,
-          x: cropMinX,
-          y: cropMinY,
-          width: cropMaxX - cropMinX + 1,
-          height: cropMaxY - cropMinY + 1,
-        );
+      // Step 4: Prepare output buffer: [1, 20, 57]
+      // 57 = 1 objectness + 52 classes + 4 bbox coords
+      var output = List.generate(
+        1,
+        (_) => List.generate(
+          MAX_DETECTIONS,
+          (_) => List.filled(1 + NUM_CLASSES + 4, 0.0),
+        ),
+      );
 
-        // Resize while preserving aspect ratio to fit 20x20
-        final scale = 20 / max(cropped.width, cropped.height);
-        final newWidth = (cropped.width * scale).round();
-        final newHeight = (cropped.height * scale).round();
-        final resized = img.copyResize(cropped, width: newWidth, height: newHeight);
+      // Step 5: Run inference
+      interpreter.run(input, output);
 
-        // Center on 28x28 white canvas
-        final canvas28 = img.Image(width: 28, height: 28);
-        img.fill(canvas28, color: img.ColorRgb8(255, 255, 255));
-        final xOffset = ((28 - newWidth) / 2).round();
-        final yOffset = ((28 - newHeight) / 2).round();
-        img.compositeImage(canvas28, resized, dstX: xOffset, dstY: yOffset);
+      // Step 6: Parse detections
+      List<DetectedSymbol> newDetections = [];
 
-        // Convert to [1,28,28,1] with inverted grayscale
-        final input = List.generate(1, (_) => List.generate(28, (y) {
-          return List.generate(28, (x) {
-            final pixel = canvas28.getPixel(x, y);
-            final gray = (0.299 * pixel.r + 0.587 * pixel.g + 0.114 * pixel.b) / 255.0;
-            return [1 - gray]; // white background → 0, black strokes → 1
-          });
-        }));
+      
+      for (int i = 0; i < MAX_DETECTIONS; i++) {
+        final detection = output[0][i];
 
-        // Run TFLite model
-        var output = List.generate(1, (_) => List.filled(52, 0.0));
-        interpreter.run(input, output);
+        // Extract objectness score (apply sigmoid)
+        final objectness = _sigmoid(detection[0]);
 
-        // Find predicted label
-        final outputList = output[0];
-        final maxIndex = outputList.indexWhere(
-          (v) => v == outputList.reduce((a, b) => a > b ? a : b),
-        );
-        final predictedLabel = labels[maxIndex];
-        final confidence = outputList[maxIndex];
-        
-        print('Symbol ${i + 1}: "$predictedLabel" (${(confidence * 100).toStringAsFixed(1)}% confidence)');
+        if (objectness > CONFIDENCE_THRESHOLD) {
+          // Extract class probabilities (apply softmax)
+          final classLogits = detection.sublist(1, 1 + NUM_CLASSES);
+          final classProbs = _softmax(classLogits);
+          
+          // Get predicted class
+          int classId = 0;
+          double maxProb = classProbs[0];
+          for (int j = 1; j < NUM_CLASSES; j++) {
+            if (classProbs[j] > maxProb) {
+              maxProb = classProbs[j];
+              classId = j;
+            }
+          }
 
-        // Convert preprocessed input to image for display
-        final Uint8List modelView = modelInputToImage(input);
-        final Uint8List symbolThumbnail = Uint8List.fromList(img.encodePng(canvas28));
+          // Extract bbox coordinates (normalized [0, 1])
+          final xCenter = detection[1 + NUM_CLASSES];
+          final yCenter = detection[1 + NUM_CLASSES + 1];
+          final width = detection[1 + NUM_CLASSES + 2];
+          final height = detection[1 + NUM_CLASSES + 3];
 
-        // Add to saved list
-        setState(() {
-          saved.add(SavedImage(
-            thumbnail: symbolThumbnail,
-            detections: [],
-            modelView: modelView,
+          // Convert to pixel coordinates relative to ORIGINAL canvas size
+          final scaleX = fullImage.width / INPUT_SIZE;
+          final scaleY = fullImage.height / INPUT_SIZE;
+          
+          final x1 = ((xCenter - width / 2) * INPUT_SIZE * scaleX).clamp(0, fullImage.width).toInt();
+          final y1 = ((yCenter - height / 2) * INPUT_SIZE * scaleY).clamp(0, fullImage.height).toInt();
+          final x2 = ((xCenter + width / 2) * INPUT_SIZE * scaleX).clamp(0, fullImage.width).toInt();
+          final y2 = ((yCenter + height / 2) * INPUT_SIZE * scaleY).clamp(0, fullImage.height).toInt();
+
+          // Calculate combined confidence
+          final confidence = objectness * maxProb;
+
+          // Optional: Extract thumbnail of detected symbol
+          Uint8List? thumbnail;
+          try {
+            final cropped = img.copyCrop(fullImage, 
+              x: x1, y: y1, 
+              width: x2 - x1, 
+              height: y2 - y1
+            );
+            thumbnail = Uint8List.fromList(img.encodePng(cropped));
+          } catch (e) {
+            print('Could not crop thumbnail: $e');
+          }
+
+          newDetections.add(DetectedSymbol(
+            label: labels[classId],
+            confidence: confidence,
+            x1: x1,
+            y1: y1,
+            x2: x2,
+            y2: y2,
+            thumbnail: thumbnail,
           ));
-        });
+        }
       }
 
-      // Clear canvas after processing all symbols
-      
-      print('✅ Processed ${boxes.length} symbols');
+      // Step 7: Sort by confidence (highest first)
+      newDetections.sort((a, b) => b.confidence.compareTo(a.confidence));
+
+      // Step 8: Update the detectedSymbols list
+      setState(() {
+        detectedSymbols = newDetections;
+
+      });
+
+      // Step 9: Print results
+      if (newDetections.isNotEmpty) {
+        print('\nDetected ${newDetections.length} symbols:');
+        for (var symbol in newDetections) {
+          print('  ${symbol.label}: [${symbol.x1}, ${symbol.y1}, ${symbol.x2}, ${symbol.y2}] '
+                '(${(symbol.confidence * 100).toStringAsFixed(1)}%)');
+        }
+      }
 
     } catch (e) {
-      print('❌ Error in multiple(): $e');
+      print("Error in multiple(): $e");
     }
   }
+  
+  // Sigmoid activation - for multiple()
+  double _sigmoid(double x) {
+    return 1.0 / (1.0 + math.exp(-x));
+  }
 
-  ///// END FUNCTIONS /////
+  // Softmax activation - for multiple()
+  List<double> _softmax(List<double> logits) {
+    final maxLogit = logits.reduce((a, b) => a > b ? a : b);
+    final expValues = logits.map((x) => math.exp(x - maxLogit)).toList();
+    final sumExp = expValues.reduce((a, b) => a + b);
+    return expValues.map((x) => x / sumExp).toList();
+  }
+
+  // Clear canvas and Detected list
+  void clearCanvas() {
+    setState(() {
+      _controller.clear();
+      detectedSymbols.clear();
+    });
+    print("Canvas and detections cleared.");
+  }
+
+  // -------------------------- FUNCTIONS END --------------------------//
+  
   @override
   void initState() {
     super.initState();
+
+    _loadModel(); // always stays
+
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
-    );
-    _loadModel(); // always stays
-    // starts timer - always stays
-    _loadModel().then((_) { // always stays
-      _startAutoProcessing();
-    });
-
-    // Only called if gathering training data
-    // loadSavedData();
-    // currentLabel = getNextLabel(); 
+    );  
   }
 
   @override
   void dispose() {
     _animationController.dispose();
-    _stopAutoProcessing();
+
     super.dispose();
   }
 
@@ -875,7 +390,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
         padding: const EdgeInsets.all(15.0),
         child: Row(
           children: [
-            // left side - canvas
+            // left side - canvas and buttons
             Expanded(
               flex: 80,
               child: Material(
@@ -891,10 +406,12 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                     // Use full available width and height (rectangle)
                     final canvasWidth = availableWidth.clamp(200.0, double.infinity);
                     final canvasHeight = maxCanvasHeight.clamp(200.0, double.infinity);
-                
+
+
                     return Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
+
                         // canvas
                         Container(
                           width: canvasWidth, 
@@ -903,121 +420,44 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                           child: Scribble(notifier: _controller, drawPen: true,),
                         ),
                         const SizedBox(height: 14),
+
                         // Buttons - under canvas
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                          child: LayoutBuilder(
-                            builder: (context, constraints) {
-                              // If narrow, stack vertically; otherwise horizontal
-                              if (constraints.maxWidth < 400) {
-                                return Column(
-                                  children: [
-                                    SizedBox(
-                                      width: double.infinity,
-                                      child: ElevatedButton(
-                                        onPressed: _controller.undo, 
-                                        child: const Text("Undo")
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    SizedBox(
-                                      width: double.infinity,
-                                      child: ElevatedButton(
-                                        onPressed: _controller.clear, 
-                                        child: const Text("Clear")
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    SizedBox(
-                                      width: double.infinity,
-                                      child: ElevatedButton(
-                                        // This changes depending if we are gathering training data or verifying model prediction, ModelView
-
-                                        // If gathering training data use this 
-                                        //if (currentLabel == null) return;
-                                        //await _saveModelInputList(currentLabel!);
-                                        //await ultimateSave();
-
-                                        // Check if we've completed 50 rounds
-                                        //if (round >= 50) {
-                                        //  // Optionally show a message
-                                        //  ScaffoldMessenger.of(context).showSnackBar(
-                                        //   const SnackBar(content: Text('Collection complete!')),
-                                        //  );
-                                        //  return; // stop here, don't pick a new label
-                                        //}
-                                          
-                                        // Pick a new label after saving
-                                        //setState(() {
-                                        //  currentLabel = getNextLabel();                              
-                                        //});
-
-                                        // If verifying model prediction, ModelView use this 
-                                        onPressed: multiple, 
-                                        child: const Text('Save'),
-                                      ),
-                                    ),
-                                  ],
-                                );
-                              } else {
-                                return Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                                  children: [
-                                    Expanded(
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                                        child: ElevatedButton(
-                                          onPressed: _controller.undo, 
-                                          child: const Text("Undo")
-                                        ),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                                        child: ElevatedButton(
-                                          onPressed: _controller.clear, 
-                                          child: const Text("Clear")
-                                        ),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                                        child: ElevatedButton(
-                                          // This changes depending if we are gathering training data or verifying model prediction, ModelView
-
-                                          // If gathering training data use this 
-                                          //if (currentLabel == null) return;
-                                          //await _saveModelInputList(currentLabel!);
-                                          //await ultimateSave();
-
-                                          // Check if we've completed 25 rounds
-                                          //if (round >= 25) {
-                                          //  // Optionally show a message
-                                          //  ScaffoldMessenger.of(context).showSnackBar(
-                                          //   const SnackBar(content: Text('Collection complete!')),
-                                          //  );
-                                          //  return; // stop here, don't pick a new label
-                                          //}
-                                          
-                                          // Pick a new label after saving
-                                          //setState(() {
-                                          //  currentLabel = getNextLabel();                              
-                                          //});
-
-                                          // If verifying model prediction, ModelView use this 
-                                          onPressed: multiple, 
-                                          child: const Text('Save'),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                );
-                              }
-                            },
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: [
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                                  child: ElevatedButton(
+                                    onPressed: _controller.undo, 
+                                    child: const Text("Undo")
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                                  child: ElevatedButton(
+                                    onPressed: clearCanvas,
+                                    child: const Text("Clear")
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                                  child: ElevatedButton(
+                                    onPressed: multiple,
+                                    child: const Text("Detect")
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ), 
+
                         const SizedBox(height: 16),               
                       ],
                     );
@@ -1025,7 +465,8 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                 ),
               ),
             ),
-            // side divider                  
+            
+            // Divider                  
             const VerticalDivider(width: 1, color: Colors.grey, thickness: 1),
             
             // right side - predictions
@@ -1035,54 +476,97 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                 color: Colors.grey[400],
                 child: Column(
                   children: [
-                    Expanded(
-                      child: ListView.builder(
-                        padding: const EdgeInsets.all(8.0),
-                        itemCount: saved.length,
-                        itemBuilder: (context, index) {
-                          final item = saved[index];
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 4.0),
-                            child: Column(
-                              children: [
-                                Row(
-                                  children: [
-                                    // Works if we are verifying model prediction, ModelView
-                                    Image.memory(
-                                      item.modelView, 
-                                      width: 40, height: 40, 
-                                      fit: BoxFit.contain,
-                                    ), 
-                                    const SizedBox(width: 4),
-                                    Image.memory(
-                                      item.thumbnail, 
-                                      width: 40, height: 40, 
-                                      fit: BoxFit.contain,
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4,),
-                                Text(
-                                  'Prediction: ${item.detections}',
-                                  style: const TextStyle(fontSize: 12),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const Divider(),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton (
-                          onPressed: () => setState(() => saved.clear()),
-                          child: const Text("Clear All"),
+
+                    // title
+                    const Padding(
+                      padding: EdgeInsets.all(8.0),
+                      child: Text(
+                        'Detected Symbols',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
+                    ),
+                    // if empty
+                    Expanded(
+                      child: detectedSymbols.isEmpty
+                        ? const Center(
+                            child: Text(
+                              'No symbols detected yet.\nDraw something!',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Colors.grey),
+                            ),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.all(8.0),
+                            itemCount: detectedSymbols.length,
+                            itemBuilder: (context, index) {
+                              final symbol = detectedSymbols[index];
+                              return Card(
+                                elevation: 2,
+                                margin: const EdgeInsets.symmetric(vertical: 4.0),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(8.0),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          // Thumbnail if available
+                                          if (symbol.thumbnail != null)
+                                            Container(
+                                              width: 50,
+                                              height: 50,
+                                              decoration: BoxDecoration(
+                                                border: Border.all(color: Colors.grey),
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: Image.memory(
+                                                symbol.thumbnail!,
+                                                fit: BoxFit.contain,
+                                              ),
+                                            ),
+                                          const SizedBox(width: 8),
+                                          // Label and confidence
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  symbol.label,
+                                                  style: const TextStyle(
+                                                    fontSize: 20,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                                Text(
+                                                  '${(symbol.confidence * 100).toStringAsFixed(1)}% confident',
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                    color: Colors.grey[700],
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      // coordinates
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'Position: (${symbol.x1}, ${symbol.y1}) → (${symbol.x2}, ${symbol.y2})',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color: Colors.grey[600],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
                     ),
                   ],
                 ),
