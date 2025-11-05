@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:senior_project/screens/glossary_screen.dart';
+import 'package:senior_project/screens/glossary_frontend.dart';
+import 'package:senior_project/screens/glossary_backend.dart';
+
 import 'package:senior_project/screens/login_screen.dart';
 import 'package:senior_project/screens/symbols_screen.dart';
 import 'dart:math' as math;
@@ -182,12 +184,81 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     print('Detected ${newDetections.length} symbols');
   }
 
-  // ==================== GLOSSARY COMPARISON (PLACEHOLDER) ====================
-  
+  // ==================== GLOSSARY COMPARISON ====================
+
   Future<String> comparingCheckedGlossaries(SymbolCluster cluster) async {
-    // TODO: Implement actual glossary comparison
-    // This will be replaced with real matching logic
-    return "??";
+    // Load saved glossary (the one we already have in backend)
+    final glossary = Glossary();
+    await glossary.loadFromPrefs();
+
+    // Get all entries (no isChecked filtering)
+    final entries = glossary.entries;
+
+    if (entries.isEmpty) {
+      print("No glossary entries available.");
+      return "??";
+    }
+
+    // Get the symbol strokes from this detected cluster
+    final currentSymbolStrokes = cluster.strokes;
+
+    double bestScore = 0.0;
+    String bestMatch = "??";
+
+    for (final entry in entries) {
+      if (entry.strokes == null || entry.strokes!.isEmpty) continue;
+
+      // Compare the stored strokes with the current cluster strokes
+      final similarity = _compareStrokes(
+        entry.strokes!.map((s) => s.points).toList(),
+        currentSymbolStrokes.map((s) => s.points).toList(),
+      );
+
+      print("Compared with ${entry.english} → similarity: $similarity");
+
+      if (similarity > bestScore) {
+        bestScore = similarity;
+        bestMatch = entry.spanish; // or .english depending on translation direction
+      }
+    }
+
+    // Only return a match if similarity is above threshold
+    return bestScore > 0.5 ? bestMatch : "??";
+  }
+
+  // ==================== BASIC STROKE COMPARISON ====================
+
+  double _compareStrokes(List<List<Offset>> stored, List<List<Offset>> input) {
+    // Simple heuristic comparison — counts how many strokes are “similar” in length and shape
+    int matches = 0;
+
+    for (var stroke1 in input) {
+      for (var stroke2 in stored) {
+        final sim = _strokeSimilarity(stroke1, stroke2);
+        if (sim > 0.7) matches++;
+      }
+    }
+
+    return matches / (stored.length + input.length - matches);
+  }
+
+  double _strokeSimilarity(List<Offset> a, List<Offset> b) {
+    if (a.isEmpty || b.isEmpty) return 0.0;
+
+    // Compare by normalized path length and average shape
+    final lenA = a.length.toDouble();
+    final lenB = b.length.toDouble();
+
+    final minLen = lenA < lenB ? lenA : lenB;
+    double total = 0;
+
+    for (int i = 0; i < minLen; i++) {
+      final pA = a[(i / lenA * a.length).floor()];
+      final pB = b[(i / lenB * b.length).floor()];
+      total += 1.0 - ((pA - pB).distance / 100.0).clamp(0.0, 1.0);
+    }
+
+    return total / minLen;
   }
 
   // ==================== CLUSTERING ALGORITHM ====================
@@ -342,7 +413,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                 Navigator.pop(context);
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const GlossaryScreen()),
+                  MaterialPageRoute(builder: (context) => GlossaryScreen()),
                 );
               },
             ),
