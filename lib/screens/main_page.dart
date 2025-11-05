@@ -2,22 +2,65 @@ import 'package:flutter/material.dart';
 import 'package:senior_project/screens/glossary_screen.dart';
 import 'package:senior_project/screens/login_screen.dart';
 import 'package:senior_project/screens/symbols_screen.dart';
-
-import 'package:tflite_flutter/tflite_flutter.dart';
-import 'package:image/image.dart' as img;
-import 'package:scribble/scribble.dart';
-import 'dart:typed_data';
-import 'dart:async';
 import 'dart:math' as math;
 
+// ==================== DATA CLASSES ====================
 
-// Saves Label, ConfidenceScore, Coordinates, Thumbnail of Image
-// Class to hold all information for each detected symbol
+// Represents a single stroke (pen down → pen up)
+class Stroke {
+  final List<Offset> points;
+  final DateTime startTime;
+  final DateTime endTime;
+
+  Stroke({
+    required this.points,
+    required this.startTime,
+    required this.endTime,
+  });
+
+  // Get bounding box of this stroke
+  Rect getBoundingBox() {
+    if (points.isEmpty) return Rect.zero;
+    
+    double minX = points.first.dx;
+    double minY = points.first.dy;
+    double maxX = points.first.dx;
+    double maxY = points.first.dy;
+
+    for (var point in points) {
+      if (point.dx < minX) minX = point.dx;
+      if (point.dy < minY) minY = point.dy;
+      if (point.dx > maxX) maxX = point.dx;
+      if (point.dy > maxY) maxY = point.dy;
+    }
+
+    return Rect.fromLTRB(minX, minY, maxX, maxY);
+  }
+
+  // Get center point
+  Offset get center {
+    final box = getBoundingBox();
+    return box.center;
+  }
+}
+
+// Represents a detected symbol (group of strokes)
+class SymbolCluster {
+  final List<Stroke> strokes;
+  final Rect boundingBox;
+
+  SymbolCluster({
+    required this.strokes,
+    required this.boundingBox,
+  });
+}
+
+// Represents a detected symbol with match info
 class DetectedSymbol {
-  final String label;           // The symbol ("A", "l_z")
+  final String label;           // Matched label from glossary
   final double confidence;      // Confidence score (0.0 to 1.0)
   final int x1, y1, x2, y2;    // Bounding box coordinates
-  final Uint8List? thumbnail;   // Cropped image of the symbol
+  final List<Stroke> strokes;   // The actual strokes
 
   DetectedSymbol({
     required this.label,
@@ -26,17 +69,16 @@ class DetectedSymbol {
     required this.y1,
     required this.x2,
     required this.y2,
-    this.thumbnail,
+    required this.strokes,
   });
 
-  // Helper to get bbox center
   double get centerX => (x1 + x2) / 2;
   double get centerY => (y1 + y2) / 2;
-  
-  // Helper to get bbox dimensions
   int get width => x2 - x1;
   int get height => y2 - y1;
 }
+
+// ==================== MAIN PAGE ====================
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -47,239 +89,220 @@ class MainPage extends StatefulWidget {
 
 class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin {
   
-  // Model constants
-  static const int INPUT_SIZE = 128;
-  static const int MAX_DETECTIONS = 20;
-  static const int NUM_CLASSES = 52;
-  // static const double CONFIDENCE_THRESHOLD = 0.3;
-  static const double CONFIDENCE_THRESHOLD = 0.50;
+  // ==================== SETTINGS ====================
   
-  // Model Interpreter
-  late Interpreter interpreter;
-
-  // List that hold info for EACH symbol
+  static const double TIME_THRESHOLD_MS = 500;    // Strokes within 500ms = same symbol
+  static const double SPATIAL_THRESHOLD_PX = 2500; // Squared distance (50px * 50px)
+  static const double MIN_SYMBOL_SIZE = 100;      // Minimum area (px²) for valid symbol
+  
+  // ==================== STATE ====================
+  
   List<DetectedSymbol> detectedSymbols = [];
-
-  // Lables list l_a - l_z and A - Z
-  final List<String> labels = [
-    ...List.generate(26, (i) => 'l_${String.fromCharCode(97 + i)}'), // l_a to l_z
-    ...List.generate(26, (i) => String.fromCharCode(65 + i)),        // A to Z
-  ];
-
-  // Canvas pen settings
-  final ScribbleNotifier _controller = ScribbleNotifier()
-  ..setStrokeWidth(10.0)  
-  ..setColor(Colors.black);
-
-  // UI Variables
+  List<Stroke> allStrokes = [];
+  List<Offset> currentStrokePoints = [];
+  DateTime? currentStrokeStartTime;
+  
   late AnimationController _animationController;
-  bool isMenuOpen = false;
 
-  // -------------------------- FUNCTIONS START --------------------------//
+  // ==================== STROKE TRACKING ====================
 
-  // Loads model
-  Future<void> _loadModel() async {
-    try {
-      interpreter = await Interpreter.fromAsset('assets/models/symbol_detector.tflite');
-      print('Model loaded successfully');
-      print('Input shape: ${interpreter.getInputTensor(0).shape}');
-      print('Output shape: ${interpreter.getOutputTensor(0).shape}');
-    } catch (e) {
-      print('Error loading model: $e');
-    }
+  void _onPanStart(DragStartDetails details) {
+    setState(() {
+      currentStrokePoints = [details.localPosition];
+      currentStrokeStartTime = DateTime.now();
+    });
   }
 
-  // Preprocesses ENTIRE canvas, feeds to model, save detections to Detected list for output
-  Future<void> multiple() async {
-    try {
-      // Step 1: Get canvas as image
-      final ByteData byteData = await _controller.renderImage();
-      final Uint8List pngBytes = byteData.buffer.asUint8List();
-      final img.Image? fullImage = img.decodeImage(pngBytes);
-      if (fullImage == null) return;
+  void _onPanUpdate(DragUpdateDetails details) {
+    setState(() {
+      currentStrokePoints.add(details.localPosition);
+    });
+  }
 
-      // Step 2: Check if canvas is empty
-      bool hasContent = false;
-      outerLoop: for (int y = 0; y < fullImage.height; y++) {
-        for (int x = 0; x < fullImage.width; x++) {
-          final pixel = fullImage.getPixel(x, y);
-          final gray = (0.299 * pixel.r + 0.587 * pixel.g + 0.114 * pixel.b).toInt();
-          if (gray < 240) {
-            hasContent = true;
-            break outerLoop;
-          }
-        }
-      }
-      if (!hasContent) {
-        // Canvas is empty, clear detections
-        if (detectedSymbols.isNotEmpty) {
-          setState(() {
-            detectedSymbols.clear();
-          });
-        }
-        return;
-      }
-
-      // Step 3: Preprocess image to 128x128 grayscale normalized
-      final grayscale = img.grayscale(fullImage);
-      final resized = img.copyResize(grayscale, width: INPUT_SIZE, height: INPUT_SIZE);
-
-      // Convert to model input format: [1, 128, 128, 1]
-      final input = List.generate(1, (_) =>
-        List.generate(INPUT_SIZE, (y) =>
-          List.generate(INPUT_SIZE, (x) {
-            final pixel = resized.getPixel(x, y);
-            return [pixel.r.toDouble() / 255.0];
-          })
-        )
+  void _onPanEnd(DragEndDetails details) {
+    if (currentStrokePoints.isNotEmpty && currentStrokeStartTime != null) {
+      final stroke = Stroke(
+        points: List.from(currentStrokePoints),
+        startTime: currentStrokeStartTime!,
+        endTime: DateTime.now(),
       );
-
-      // Step 4: Prepare output buffer: [1, 20, 57]
-      // 57 = 1 objectness + 52 classes + 4 bbox coords
-      var output = List.generate(
-        1,
-        (_) => List.generate(
-          MAX_DETECTIONS,
-          (_) => List.filled(1 + NUM_CLASSES + 4, 0.0),
-        ),
-      );
-
-      // Step 5: Run inference
-      interpreter.run(input, output);
-
-      // Step 6: Parse detections
-      List<DetectedSymbol> newDetections = [];
-
       
-      for (int i = 0; i < MAX_DETECTIONS; i++) {
-        final detection = output[0][i];
-
-        // Extract objectness score (apply sigmoid)
-        final objectness = _sigmoid(detection[0]);
-
-        if (objectness > CONFIDENCE_THRESHOLD) {
-          // Extract class probabilities (apply softmax)
-          final classLogits = detection.sublist(1, 1 + NUM_CLASSES);
-          final classProbs = _softmax(classLogits);
-          
-          // Get predicted class
-          int classId = 0;
-          double maxProb = classProbs[0];
-          for (int j = 1; j < NUM_CLASSES; j++) {
-            if (classProbs[j] > maxProb) {
-              maxProb = classProbs[j];
-              classId = j;
-            }
-          }
-
-          // Extract bbox coordinates (normalized [0, 1])
-          final xCenter = detection[1 + NUM_CLASSES];
-          final yCenter = detection[1 + NUM_CLASSES + 1];
-          final width = detection[1 + NUM_CLASSES + 2];
-          final height = detection[1 + NUM_CLASSES + 3];
-
-          // Convert to pixel coordinates relative to ORIGINAL canvas size
-          final scaleX = fullImage.width / INPUT_SIZE;
-          final scaleY = fullImage.height / INPUT_SIZE;
-          
-          final x1 = ((xCenter - width / 2) * INPUT_SIZE * scaleX).clamp(0, fullImage.width).toInt();
-          final y1 = ((yCenter - height / 2) * INPUT_SIZE * scaleY).clamp(0, fullImage.height).toInt();
-          final x2 = ((xCenter + width / 2) * INPUT_SIZE * scaleX).clamp(0, fullImage.width).toInt();
-          final y2 = ((yCenter + height / 2) * INPUT_SIZE * scaleY).clamp(0, fullImage.height).toInt();
-
-          // Calculate combined confidence
-          final confidence = objectness * maxProb;
-
-          // Optional: Extract thumbnail of detected symbol
-          Uint8List? thumbnail;
-          try {
-            final cropped = img.copyCrop(fullImage, 
-              x: x1, y: y1, 
-              width: x2 - x1, 
-              height: y2 - y1
-            );
-            thumbnail = Uint8List.fromList(img.encodePng(cropped));
-          } catch (e) {
-            print('Could not crop thumbnail: $e');
-          }
-
-          newDetections.add(DetectedSymbol(
-            label: labels[classId],
-            confidence: confidence,
-            x1: x1,
-            y1: y1,
-            x2: x2,
-            y2: y2,
-            thumbnail: thumbnail,
-          ));
-        }
-      }
-
-      // Step 7: Sort by confidence (highest first)
-      newDetections.sort((a, b) => b.confidence.compareTo(a.confidence));
-
-      // Step 8: Update the detectedSymbols list
       setState(() {
-        detectedSymbols = newDetections;
-
+        allStrokes.add(stroke);
       });
 
-      // Step 9: Print results
-      if (newDetections.isNotEmpty) {
-        print('\nDetected ${newDetections.length} symbols:');
-        for (var symbol in newDetections) {
-          print('  ${symbol.label}: [${symbol.x1}, ${symbol.y1}, ${symbol.x2}, ${symbol.y2}] '
-                '(${(symbol.confidence * 100).toStringAsFixed(1)}%)');
-        }
-      }
-
-    } catch (e) {
-      print("Error in multiple(): $e");
+      print('✏️ Stroke completed: ${stroke.points.length} points');
+      
+      currentStrokePoints = [];
+      currentStrokeStartTime = null;
     }
   }
+
+  // ==================== SYMBOL DETECTION ====================
+
+  Future<void> detectSymbols() async {
+    if (allStrokes.isEmpty) {
+      setState(() {
+        detectedSymbols.clear();
+      });
+      print('No strokes to detect');
+      return;
+    }
+
+    print('\nStarting detection with ${allStrokes.length} strokes...');
+
+    // Step 1: Cluster strokes into symbol groups
+    List<SymbolCluster> clusters = _clusterStrokes(allStrokes);
+    print('Found ${clusters.length} symbol clusters');
+
+    // Step 2: For each cluster, match to glossary
+    List<DetectedSymbol> newDetections = [];
+    
+    for (int i = 0; i < clusters.length; i++) {
+      final cluster = clusters[i];
+      
+      // Match this cluster to glossaries
+      final matchedLabel = await comparingCheckedGlossaries(cluster);
+      
+      newDetections.add(DetectedSymbol(
+        label: matchedLabel,
+        confidence: 0.0, // Will be set by glossary comparison
+        x1: cluster.boundingBox.left.toInt(),
+        y1: cluster.boundingBox.top.toInt(),
+        x2: cluster.boundingBox.right.toInt(),
+        y2: cluster.boundingBox.bottom.toInt(),
+        strokes: cluster.strokes,
+      ));
+    }
+
+    setState(() {
+      detectedSymbols = newDetections;
+    });
+
+    print('Detected ${newDetections.length} symbols');
+  }
+
+  // ==================== GLOSSARY COMPARISON (PLACEHOLDER) ====================
   
-  // Sigmoid activation - for multiple()
-  double _sigmoid(double x) {
-    return 1.0 / (1.0 + math.exp(-x));
+  Future<String> comparingCheckedGlossaries(SymbolCluster cluster) async {
+    // TODO: Implement actual glossary comparison
+    // This will be replaced with real matching logic
+    return "??";
   }
 
-  // Softmax activation - for multiple()
-  List<double> _softmax(List<double> logits) {
-    final maxLogit = logits.reduce((a, b) => a > b ? a : b);
-    final expValues = logits.map((x) => math.exp(x - maxLogit)).toList();
-    final sumExp = expValues.reduce((a, b) => a + b);
-    return expValues.map((x) => x / sumExp).toList();
+  // ==================== CLUSTERING ALGORITHM ====================
+
+  List<SymbolCluster> _clusterStrokes(List<Stroke> strokes) {
+    if (strokes.isEmpty) return [];
+
+    List<SymbolCluster> clusters = [];
+    List<Stroke> currentCluster = [strokes[0]];
+
+    for (int i = 1; i < strokes.length; i++) {
+      final prevStroke = strokes[i - 1];
+      final currentStroke = strokes[i];
+
+      // Calculate time gap
+      final timeDiff = currentStroke.startTime.difference(prevStroke.endTime).inMilliseconds;
+
+      // Calculate spatial distance (squared, to avoid sqrt)
+      final prevCenter = prevStroke.center;
+      final currentCenter = currentStroke.center;
+      final dx = prevCenter.dx - currentCenter.dx;
+      final dy = prevCenter.dy - currentCenter.dy;
+      final distanceSquared = dx * dx + dy * dy;
+
+      // Decision: Same symbol or new symbol?
+      bool sameSymbol = false;
+
+      if (timeDiff < TIME_THRESHOLD_MS) {
+        sameSymbol = true; // Recent stroke = same symbol
+      } else if (distanceSquared < SPATIAL_THRESHOLD_PX) {
+        sameSymbol = true; // Close together = same symbol (handles i, j, !)
+      }
+
+      if (sameSymbol) {
+        currentCluster.add(currentStroke);
+      } else {
+        // Save previous cluster and start new one
+        clusters.add(_createCluster(currentCluster));
+        currentCluster = [currentStroke];
+      }
+    }
+
+    // Don't forget the last cluster
+    if (currentCluster.isNotEmpty) {
+      clusters.add(_createCluster(currentCluster));
+    }
+
+    // Filter out tiny clusters (noise)
+    clusters = clusters.where((cluster) {
+      final area = cluster.boundingBox.width * cluster.boundingBox.height;
+      return area >= MIN_SYMBOL_SIZE;
+    }).toList();
+
+    return clusters;
   }
 
-  // Clear canvas and Detected list
+  SymbolCluster _createCluster(List<Stroke> strokes) {
+    double minX = double.infinity;
+    double minY = double.infinity;
+    double maxX = double.negativeInfinity;
+    double maxY = double.negativeInfinity;
+
+    for (var stroke in strokes) {
+      final box = stroke.getBoundingBox();
+      if (box.left < minX) minX = box.left;
+      if (box.top < minY) minY = box.top;
+      if (box.right > maxX) maxX = box.right;
+      if (box.bottom > maxY) maxY = box.bottom;
+    }
+
+    return SymbolCluster(
+      strokes: strokes,
+      boundingBox: Rect.fromLTRB(minX, minY, maxX, maxY),
+    );
+  }
+
+  // ==================== UI ACTIONS ====================
+
   void clearCanvas() {
     setState(() {
-      _controller.clear();
       detectedSymbols.clear();
+      allStrokes.clear();
+      currentStrokePoints = [];
+      currentStrokeStartTime = null;
     });
-    print("Canvas and detections cleared.");
+    print("Canvas cleared");
   }
 
-  // -------------------------- FUNCTIONS END --------------------------//
-  
+  void undoStroke() {
+    if (allStrokes.isNotEmpty) {
+      setState(() {
+        allStrokes.removeLast();
+      });
+      print("Undo stroke");
+    }
+  }
+
+  // ==================== LIFECYCLE ====================
+
   @override
   void initState() {
     super.initState();
-
-    _loadModel(); // always stays
-
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
-    );  
+    );
   }
 
   @override
   void dispose() {
     _animationController.dispose();
-
     super.dispose();
   }
+
+  // ==================== UI ====================
 
   @override
   Widget build(BuildContext context) {    
@@ -289,47 +312,13 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
         backgroundColor: Colors.transparent,
         elevation: 0,
         automaticallyImplyLeading: false,
-        // This changes depending if we are gathering training data or verifying model prediction, ModelView
-        
-        // If gathering data use
-        //title: Text(
-        //  'Please write "$currentLabel" and click save',
-        //  style: const TextStyle(color: Colors.black),
-        //),
-
-        // If verifying use
         title: Text(
-          "Welcome User", 
-          style: const TextStyle(color: Colors.black),
+          "Strokes: ${allStrokes.length} | Symbols: ${detectedSymbols.length}", 
+          style: const TextStyle(color: Colors.black, fontSize: 14),
         ),
-
         leading: Builder(
           builder: (context) => IconButton(
-            icon: AnimatedBuilder(
-              animation: _animationController,
-              builder: (context, child) {
-                return Transform.rotate(
-                  angle: _animationController.value * 0.5 * 3.141592653589793,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        height: 2,
-                        width: 20,
-                        color: Colors.black,
-                      ),
-                      const SizedBox(height: 4),
-                      Container(
-                        height: 2,
-                        width: 15,
-                        color: Colors.black,
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
+            icon: Icon(Icons.menu, color: Colors.black),
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
@@ -349,7 +338,6 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
             ListTile(
               leading: const Icon(Icons.book, color: Colors.white),
               title: const Text('Glossary', style: TextStyle(color: Colors.white)),
-              trailing: const Icon(Icons.arrow_forward_ios, color: Colors.white),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(
@@ -361,7 +349,6 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
             ListTile(
               leading: const Icon(Icons.star, color: Colors.white),
               title: const Text('Symbols', style: TextStyle(color: Colors.white)),
-              trailing: const Icon(Icons.arrow_forward_ios, color: Colors.white),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(
@@ -390,110 +377,90 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
         padding: const EdgeInsets.all(15.0),
         child: Row(
           children: [
-            // left side - canvas and buttons
+            // Left side - canvas
             Expanded(
               flex: 80,
               child: Material(
                 elevation: 4,
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    // Calculate canvas size based on available height
-                    final availableWidth = constraints.maxWidth - 40;
-                    final availableHeight = constraints.maxHeight;
-                    final buttonAreaHeight = 80.0; // Space for buttons and spacing
-                    final maxCanvasHeight = availableHeight - buttonAreaHeight;
-
-                    // Use full available width and height (rectangle)
-                    final canvasWidth = availableWidth.clamp(200.0, double.infinity);
-                    final canvasHeight = maxCanvasHeight.clamp(200.0, double.infinity);
-
-
-                    return Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-
-                        // canvas
-                        Container(
-                          width: canvasWidth, 
-                          height: canvasHeight,
-                          color: Colors.white,
-                          child: Scribble(notifier: _controller, drawPen: true,),
-                        ),
-                        const SizedBox(height: 14),
-
-                        // Buttons - under canvas
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              Expanded(
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                                  child: ElevatedButton(
-                                    onPressed: _controller.undo, 
-                                    child: const Text("Undo")
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                                  child: ElevatedButton(
-                                    onPressed: clearCanvas,
-                                    child: const Text("Clear")
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                                  child: ElevatedButton(
-                                    onPressed: multiple,
-                                    child: const Text("Detect")
-                                  ),
-                                ),
-                              ),
-                            ],
+                child: Column(
+                  children: [
+                    // Canvas
+                    Expanded(
+                      child: GestureDetector(
+                        onPanStart: _onPanStart,
+                        onPanUpdate: _onPanUpdate,
+                        onPanEnd: _onPanEnd,
+                        child: SizedBox.expand(
+                          child: CustomPaint(
+                            painter: CanvasPainter(
+                              strokes: allStrokes,
+                              currentStroke: currentStrokePoints,
+                            ),
                           ),
-                        ), 
-
-                        const SizedBox(height: 16),               
-                      ],
-                    );
-                  },
+                        ),
+                      ),
+                    ),
+                    // Buttons
+                    Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: undoStroke,
+                              icon: const Icon(Icons.undo, size: 18),
+                              label: const Text("Undo"),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: clearCanvas,
+                              icon: const Icon(Icons.clear, size: 18),
+                              label: const Text("Clear"),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: detectSymbols,
+                              icon: const Icon(Icons.search, size: 18),
+                              label: const Text("Detect"),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue,
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
             
-            // Divider                  
-            const VerticalDivider(width: 1, color: Colors.grey, thickness: 1),
+            const VerticalDivider(width: 1, color: Colors.grey),
             
-            // right side - predictions
+            // Right side - results
             Expanded(
               flex: 20,
               child: Container(
                 color: Colors.grey[400],
                 child: Column(
                   children: [
-
-                    // title
                     const Padding(
                       padding: EdgeInsets.all(8.0),
                       child: Text(
                         'Detected Symbols',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                       ),
                     ),
-                    // if empty
                     Expanded(
                       child: detectedSymbols.isEmpty
                         ? const Center(
                             child: Text(
-                              'No symbols detected yet.\nDraw something!',
+                              'Draw symbols and\npress Detect',
                               textAlign: TextAlign.center,
                               style: TextStyle(color: Colors.grey),
                             ),
@@ -503,6 +470,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                             itemCount: detectedSymbols.length,
                             itemBuilder: (context, index) {
                               final symbol = detectedSymbols[index];
+                              
                               return Card(
                                 elevation: 2,
                                 margin: const EdgeInsets.symmetric(vertical: 4.0),
@@ -513,22 +481,12 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                                     children: [
                                       Row(
                                         children: [
-                                          // Thumbnail if available
-                                          if (symbol.thumbnail != null)
-                                            Container(
-                                              width: 50,
-                                              height: 50,
-                                              decoration: BoxDecoration(
-                                                border: Border.all(color: Colors.grey),
-                                                borderRadius: BorderRadius.circular(4),
-                                              ),
-                                              child: Image.memory(
-                                                symbol.thumbnail!,
-                                                fit: BoxFit.contain,
-                                              ),
-                                            ),
+                                          Icon(
+                                            Icons.help_outline,
+                                            color: Colors.orange,
+                                            size: 20,
+                                          ),
                                           const SizedBox(width: 8),
-                                          // Label and confidence
                                           Expanded(
                                             child: Column(
                                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -536,30 +494,21 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                                                 Text(
                                                   symbol.label,
                                                   style: const TextStyle(
-                                                    fontSize: 20,
+                                                    fontSize: 18,
                                                     fontWeight: FontWeight.bold,
                                                   ),
                                                 ),
                                                 Text(
-                                                  '${(symbol.confidence * 100).toStringAsFixed(1)}% confident',
-                                                  style: TextStyle(
-                                                    fontSize: 12,
-                                                    color: Colors.grey[700],
+                                                  'Position: (${symbol.x1}, ${symbol.y1})',
+                                                  style: const TextStyle(
+                                                    fontSize: 11,
+                                                    color: Colors.grey,
                                                   ),
                                                 ),
                                               ],
                                             ),
                                           ),
                                         ],
-                                      ),
-                                      // coordinates
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        'Position: (${symbol.x1}, ${symbol.y1}) → (${symbol.x2}, ${symbol.y2})',
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          color: Colors.grey[600],
-                                        ),
                                       ),
                                     ],
                                   ),
@@ -576,5 +525,53 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
         ),
       ),
     );
+  }
+}
+
+// ==================== CUSTOM PAINTER ====================
+
+class CanvasPainter extends CustomPainter {
+  final List<Stroke> strokes;
+  final List<Offset> currentStroke;
+
+  CanvasPainter({
+    required this.strokes,
+    required this.currentStroke,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.black
+      ..strokeWidth = 10.0
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    // Draw completed strokes
+    for (var stroke in strokes) {
+      if (stroke.points.length > 1) {
+        final path = Path();
+        path.moveTo(stroke.points[0].dx, stroke.points[0].dy);
+        for (int i = 1; i < stroke.points.length; i++) {
+          path.lineTo(stroke.points[i].dx, stroke.points[i].dy);
+        }
+        canvas.drawPath(path, paint);
+      }
+    }
+
+    // Draw current stroke being drawn
+    if (currentStroke.length > 1) {
+      final path = Path();
+      path.moveTo(currentStroke[0].dx, currentStroke[0].dy);
+      for (int i = 1; i < currentStroke.length; i++) {
+        path.lineTo(currentStroke[i].dx, currentStroke[i].dy);
+      }
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(CanvasPainter oldDelegate) {
+    return true;
   }
 }
