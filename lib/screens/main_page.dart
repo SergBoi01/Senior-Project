@@ -5,6 +5,7 @@ import 'package:senior_project/screens/glossary_frontend.dart';
 import 'package:senior_project/screens/glossary_backend.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:senior_project/screens/notebook_backend.dart';
 import 'package:senior_project/screens/login_screen.dart';
 import 'package:senior_project/screens/symbols_screen.dart';
 import 'dart:math' as math;
@@ -156,13 +157,15 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   bool _isDetecting = false;
   int _lastStrokeCount = 0;
 
+  final notebook = NotebookManager();
+
+
   bool showSpanish = true; // true = Spanish, false = English
 
   late Glossary glossary;
   late List<UserCorrection> userCorrections;
   
   List<DetectedSymbol> detectedSymbols = [];
-  List<Stroke> allStrokes = [];
   List<Offset> currentStrokePoints = [];
   DateTime? currentStrokeStartTime;
   
@@ -173,14 +176,14 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   void _startAutoDetection() {
     _autoDetectTimer = Timer.periodic(const Duration(milliseconds: 800), (timer) async {
       // Only detect if strokes changed and we're not already detecting
-      if (!_isDetecting && allStrokes.length != _lastStrokeCount) {
-        _lastStrokeCount = allStrokes.length;
+      if (!_isDetecting && notebook.currentPage.strokes.length != _lastStrokeCount) {
+        _lastStrokeCount = notebook.currentPage.strokes.length;
         
         // Wait a bit to see if user is still drawing
         await Future.delayed(const Duration(milliseconds: 400));
         
         // If stroke count changed again, user is still drawing - skip detection
-        if (allStrokes.length != _lastStrokeCount) {
+        if (notebook.currentPage.strokes.length != _lastStrokeCount) {
           return;
         }
         
@@ -190,6 +193,11 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
         _isDetecting = false;
       }
     });
+  }
+
+  void _resetAutoDetection() {
+    _autoDetectTimer?.cancel();
+    _startAutoDetection();
   }
 
   void _stopAutoDetection() {
@@ -222,7 +230,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
       );
       
       setState(() {
-        allStrokes.add(stroke);
+        notebook.currentPage.strokes.add(stroke);
       });
 
       print('Stroke completed: ${stroke.points.length} points');
@@ -235,7 +243,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   // ==================== SYMBOL DETECTION ====================
 
   Future<void> detectSymbols() async {
-    if (allStrokes.isEmpty) {
+    if (notebook.currentPage.strokes.isEmpty) {
       setState(() {
         detectedSymbols.clear();
       });
@@ -243,10 +251,10 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
       return;
     }
 
-    print('\nStarting detection with ${allStrokes.length} strokes...');
+    print('\nStarting detection with ${notebook.currentPage.strokes.length} strokes...');
 
     // Step 1: Cluster strokes into symbol groups
-    List<SymbolCluster> clusters = _clusterStrokes(allStrokes);
+    List<SymbolCluster> clusters = _clusterStrokes(notebook.currentPage.strokes);
     print('Found ${clusters.length} symbol clusters');
 
     // Step 2: For each cluster, match to glossary
@@ -619,7 +627,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   void clearCanvas() {
     setState(() {
       detectedSymbols.clear();
-      allStrokes.clear();
+      notebook.currentPage.strokes.clear();
       currentStrokePoints = [];
       currentStrokeStartTime = null;
       _lastStrokeCount = 0; // RESET COUNTER
@@ -628,9 +636,9 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   }
 
   void undoStroke() {
-    if (allStrokes.isNotEmpty) {
+    if (notebook.currentPage.strokes.isNotEmpty) {
       setState(() {
-        allStrokes.removeLast();
+        notebook.currentPage.strokes.removeLast();
       });
       print("Undo stroke");
     }
@@ -709,11 +717,15 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     print('Learned correction: ${wrongDetection.label} → $correctLabel');
     print('Total learned variations: ${userCorrections.length}');
   }
+  
   // ==================== LIFECYCLE ====================
 
   @override
   void initState() {
     super.initState();
+
+    // Loads saves pages (if any)
+    notebook.loadFromPrefs();
 
     // Use the data passed from main
     glossary = widget.glossary;
@@ -758,7 +770,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
         elevation: 0,
         automaticallyImplyLeading: false,
         title: Text(
-          "Strokes: ${allStrokes.length} | Symbols: ${detectedSymbols.length}", 
+          "Strokes: ${notebook.currentPage.strokes.length} | Symbols: ${detectedSymbols.length}", 
           style: const TextStyle(color: Colors.black, fontSize: 14),
         ),
         leading: Builder(
@@ -882,14 +894,57 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                         child: SizedBox.expand(
                           child: CustomPaint(
                             painter: CanvasPainter(
-                              strokes: allStrokes,
+                              strokes: notebook.currentPage.strokes,
                               currentStroke: currentStrokePoints,
                             ),
                           ),
                         ),
                       ),
                     ),
-                    // Buttons
+
+                    // Notebook buttons
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        ElevatedButton(
+                          onPressed: () {
+                            setState(() => notebook.prevPage());
+                          },
+                          child: const Text('Previous Page'),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed: () {
+                            setState(() => notebook.nextPage());
+                          },
+                          child: const Text('Next Page'),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed: () {
+                            setState(() => notebook.newPageAfterCurrent());
+                          },
+                          child: const Text('New Page'),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed: () {
+                            setState(() => notebook.deleteCurrentPage());
+                          },
+                          child: const Text('Delete Page'),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed: () {
+                            setState(() => notebook.restoreLastDeleted());
+                          },
+                          child: const Text('Restore Page'),
+                        ),
+                      ],
+                    ),
+
+
+                    // Canvas Edit Buttons
                     Padding(
                       padding: const EdgeInsets.all(12.0),
                       child: Row(
