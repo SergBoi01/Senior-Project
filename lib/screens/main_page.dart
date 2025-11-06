@@ -128,7 +128,14 @@ class DetectedSymbol {
 // ==================== MAIN PAGE ====================
 
 class MainPage extends StatefulWidget {
-  const MainPage({super.key});
+  final Glossary glossary;
+  final List<UserCorrection> userCorrections;
+
+  const MainPage({
+    super.key,
+    required this.glossary,
+    required this.userCorrections,
+  }); 
 
   @override
   State<MainPage> createState() => _MainPageState();
@@ -145,8 +152,8 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   // ==================== STATE ====================
   bool showSpanish = true; // true = Spanish, false = English
 
-
-  List<UserCorrection> userCorrections = [];
+  late Glossary glossary;
+  late List<UserCorrection> userCorrections;
   
   List<DetectedSymbol> detectedSymbols = [];
   List<Stroke> allStrokes = [];
@@ -239,8 +246,6 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   // ==================== IMPROVED COMPARISON ALGORITHM ====================
 
   Future<String> comparingCheckedGlossaries(SymbolCluster cluster) async {
-    final glossary = Glossary();
-    await glossary.loadFromPrefs();
 
     final entries = glossary.entries;
 
@@ -620,26 +625,28 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   @override
   void initState() {
     super.initState();
+
+    // Use the data passed from main
+    glossary = widget.glossary;
+    userCorrections = widget.userCorrections;
+
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
     );
-    _loadUserCorrections(); // Load learned variations
+
+    print('MainPage initialized with ${glossary.entries.length} glossary entries');
+    print('MainPage initialized with ${userCorrections.length} corrections');
+
   }
 
-  Future<void> _loadUserCorrections() async {
-    final prefs = await SharedPreferences.getInstance();
-    final stored = prefs.getStringList('user_corrections');
-    if (stored != null) {
-      userCorrections = stored.map((s) => UserCorrection.fromJson(jsonDecode(s))).toList();
-      print('Loaded ${userCorrections.length} user corrections');
-    }
-  }
 
   Future<void> _saveUserCorrections() async {
     final prefs = await SharedPreferences.getInstance();
     final serialized = userCorrections.map((c) => jsonEncode(c.toJson())).toList();
     await prefs.setStringList('user_corrections', serialized);
+    print('Saved ${userCorrections.length} user corrections');
+
   }
 
   @override
@@ -725,7 +732,11 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                 Navigator.pop(context);
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => GlossaryScreen()),
+                  MaterialPageRoute(
+                    builder: (context) => GlossaryScreen(
+                      glossary: glossary,
+                    )
+                  ),
                 );
               },
             ),

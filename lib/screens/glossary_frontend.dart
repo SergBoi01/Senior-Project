@@ -7,13 +7,21 @@ import 'glossary_backend.dart';
 import 'main_page.dart'; // For Stroke and CanvasPainter
 
 class GlossaryScreen extends StatefulWidget {
+  final Glossary glossary;
+
+  const GlossaryScreen({
+    super.key,
+    required this.glossary,
+  });
+
   @override
   _GlossaryScreenState createState() => _GlossaryScreenState();
 }
 
 class _GlossaryScreenState extends State<GlossaryScreen> {
   // State Variables
-  final Glossary glossary = Glossary();
+  late Glossary glossary;
+
   int? editingIndex;
   bool showCanvas = false;
 
@@ -31,14 +39,8 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   @override
   void initState() {
     super.initState();
-    _loadGlossary(); // Add this
-    glossary.printAllEntries(); // This should show spanish values
-  }
-
-  Future<void> _loadGlossary() async {
-    await glossary.loadFromPrefs();
-    setState(() {}); // Refresh UI
-    glossary.printAllEntries(); // Debug: see what loaded
+    glossary = widget.glossary;
+    print('GlossaryScreen initialized with ${glossary.entries.length} entries');
   }
 
   // ===================== CANVAS LOGIC =====================
@@ -111,7 +113,9 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
         editingIndex = null;
       });
       _clearCanvas();
-      glossary.saveToPrefs();
+      
+      await glossary.saveToPrefs();
+      print('Saved symbol for entry $editingIndex');
     }
   }
 
@@ -223,7 +227,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
               child: Text('Cancel'),
             ),
             ElevatedButton(
-              onPressed: () {
+              onPressed: () async {
                 setState(() {
                   switch (columnIndex) {
                     case 0:
@@ -242,7 +246,12 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                       break;
                   }
                 });
-                glossary.saveToPrefs();
+                
+                // SAVE IMMEDIATELY
+                await glossary.saveToPrefs();
+                print('Saved text edit for entry $rowIndex, column $columnIndex');
+                
+
                 Navigator.pop(context);
               },
               style: ElevatedButton.styleFrom(
@@ -258,11 +267,15 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   }
 
   // ===================== ENTRY MANAGEMENT =====================
-  void _addNewEntry() {
+  Future<void> _addNewEntry() async {
     setState(() {
       glossary.addEntry('', '', '', '');
     });
-    glossary.saveToPrefs();
+
+    // SAVE IMMEDIATELY
+    await glossary.saveToPrefs();
+    print('Saved new entry');
+
     Future.delayed(Duration(milliseconds: 100), () {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
@@ -323,11 +336,14 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                     _buildSymbolCell(entry, index, flex: 1),
                     IconButton(
                       icon: Icon(Icons.delete, color: Colors.red),
-                      onPressed: () {
+                      onPressed: () async {
                         setState(() {
                           glossary.deleteEntry(index);
                         });
-                        glossary.saveToPrefs();
+
+                        // SAVE IMMEDIATELY
+                        await glossary.saveToPrefs();
+                        print('Saved after deleting entry $index');
                       },
                     ),
                   ],
