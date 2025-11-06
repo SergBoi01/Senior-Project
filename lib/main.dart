@@ -13,10 +13,11 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
   // Load glossary once at startup
   final glossary = Glossary();
   await glossary.loadFromPrefs();
-  print('✅ Main: Loaded ${glossary.entries.length} glossary entries');
+  print('Main: Loaded ${glossary.entries.length} glossary entries');
   
   // Load user corrections once at startup
   final userCorrections = await _loadUserCorrections();

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:senior_project/screens/glossary_frontend.dart';
 import 'package:senior_project/screens/glossary_backend.dart';
@@ -150,6 +152,10 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   static const double MIN_SYMBOL_SIZE = 100;      // Minimum area (px²) for valid symbol
   
   // ==================== STATE ====================
+  Timer? _autoDetectTimer;
+  bool _isDetecting = false;
+  int _lastStrokeCount = 0;
+
   bool showSpanish = true; // true = Spanish, false = English
 
   late Glossary glossary;
@@ -161,6 +167,36 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   DateTime? currentStrokeStartTime;
   
   late AnimationController _animationController;
+
+  // ==================== AUTO-DETECTION ====================
+
+  void _startAutoDetection() {
+    _autoDetectTimer = Timer.periodic(const Duration(milliseconds: 800), (timer) async {
+      // Only detect if strokes changed and we're not already detecting
+      if (!_isDetecting && allStrokes.length != _lastStrokeCount) {
+        _lastStrokeCount = allStrokes.length;
+        
+        // Wait a bit to see if user is still drawing
+        await Future.delayed(const Duration(milliseconds: 400));
+        
+        // If stroke count changed again, user is still drawing - skip detection
+        if (allStrokes.length != _lastStrokeCount) {
+          return;
+        }
+        
+        // User paused - run detection
+        _isDetecting = true;
+        await detectSymbols();
+        _isDetecting = false;
+      }
+    });
+  }
+
+  void _stopAutoDetection() {
+    _autoDetectTimer?.cancel();
+    _autoDetectTimer = null;
+  }
+
 
   // ==================== STROKE TRACKING ====================
 
@@ -504,7 +540,6 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     return Offset(totalDx / magnitude, totalDy / magnitude);
   }
 
-
   // ==================== CLUSTERING ALGORITHM ====================
 
   List<SymbolCluster> _clusterStrokes(List<Stroke> strokes) {
@@ -587,6 +622,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
       allStrokes.clear();
       currentStrokePoints = [];
       currentStrokeStartTime = null;
+      _lastStrokeCount = 0; // RESET COUNTER
     });
     print("Canvas cleared");
   }
@@ -600,6 +636,59 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     }
   }
 
+  Future<void> _updateDetectionLanguage() async {
+    if (detectedSymbols.isEmpty) return;
+
+    print('\nUpdating ${detectedSymbols.length} detections to ${showSpanish ? "Spanish" : "English"}...');
+
+    List<DetectedSymbol> updatedDetections = [];
+
+    for (var symbol in detectedSymbols) {
+      // Find the matching glossary entry for this symbol
+      String newLabel = symbol.label; // Default to current label
+      
+      for (var entry in glossary.entries) {
+        // Check if this detection matches this glossary entry
+        bool matches = false;
+        
+        if (showSpanish) {
+          // Switching TO Spanish - check if current label is English
+          if (entry.english == symbol.label) {
+            matches = true;
+            newLabel = entry.spanish;
+          }
+        } else {
+          // Switching TO English - check if current label is Spanish
+          if (entry.spanish == symbol.label) {
+            matches = true;
+            newLabel = entry.english;
+          }
+        }
+        
+        if (matches) {
+          print('  ${symbol.label} → $newLabel');
+          break;
+        }
+      }
+
+      // Create updated detection with new label
+      updatedDetections.add(DetectedSymbol(
+        label: newLabel,
+        confidence: symbol.confidence,
+        x1: symbol.x1,
+        y1: symbol.y1,
+        x2: symbol.x2,
+        y2: symbol.y2,
+        strokes: symbol.strokes,
+      ));
+    }
+
+    setState(() {
+      detectedSymbols = updatedDetections;
+    });
+
+    print('Updated all detections');
+  }
 
   // ==================== USER CORRECTION SYSTEM ====================
 
@@ -635,6 +724,8 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
       duration: const Duration(milliseconds: 300),
     );
 
+    _startAutoDetection(); // START AUTO-DETECTION
+
     print('MainPage initialized with ${glossary.entries.length} glossary entries');
     print('MainPage initialized with ${userCorrections.length} corrections');
 
@@ -652,6 +743,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   @override
   void dispose() {
     _animationController.dispose();
+    _stopAutoDetection(); // STOP AUTO-DETECTION
     super.dispose();
   }
 
@@ -695,7 +787,10 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                     setState(() {
                       showSpanish = value;
                     });
-                    print('🌐 Switched to: ${showSpanish ? "Spanish" : "English"}');
+                    print('Switched to: ${showSpanish ? "Spanish" : "English"}');
+
+                    // UPDATE EXISTING DETECTIONS
+                    _updateDetectionLanguage();
                   },
                   activeThumbColor: Colors.blue,
                   inactiveThumbColor: Colors.blue,
@@ -812,18 +907,6 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                               onPressed: clearCanvas,
                               icon: const Icon(Icons.clear, size: 18),
                               label: const Text("Clear"),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              onPressed: detectSymbols,
-                              icon: const Icon(Icons.search, size: 18),
-                              label: const Text("Detect"),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.blue,
-                                foregroundColor: Colors.white,
-                              ),
                             ),
                           ),
                         ],
