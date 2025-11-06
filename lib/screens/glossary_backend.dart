@@ -10,7 +10,7 @@ class GlossaryEntry {
   String definition;
   String synonym;  
   Uint8List? symbolImage; // For display
-  List<Stroke>? strokes;  // For comparison
+  List<Stroke> strokes;   // For comparison (CHANGED: removed nullable)
 
   GlossaryEntry({
     required this.english,
@@ -18,8 +18,8 @@ class GlossaryEntry {
     required this.definition,
     required this.synonym,
     this.symbolImage,
-    this.strokes,
-  });
+    List<Stroke>? strokes,  // Accept nullable in constructor
+  }) : strokes = strokes ?? []; // But initialize to empty list
 
   GlossaryEntry.short({required String word})
       : english = word,
@@ -27,21 +27,14 @@ class GlossaryEntry {
         definition = "",
         synonym = "",
         symbolImage = null,
-        strokes = null;
+        strokes = []; // Initialize to empty list
 }
 
 class Glossary {
-  bool isChecked;      // Is glossary checked? I compare with it
-  String name;         // Name for Glossary, by User
+  bool isChecked;      
+  String name;         
 
-  final List<GlossaryEntry> _entries = [
-    GlossaryEntry.short(word: "Texas"),
-    GlossaryEntry.short(word: "Up"),
-    GlossaryEntry.short(word: "Notes"),
-    GlossaryEntry.short(word: "Happy"),
-    GlossaryEntry.short(word: "Sad"),
-    GlossaryEntry.short(word: "Oppose"),
-  ];
+  final List<GlossaryEntry> _entries = [];
 
   List<GlossaryEntry> get entries => _entries;
 
@@ -57,7 +50,7 @@ class Glossary {
       definition: definition,
       synonym: synonym,
       symbolImage: symbolImage,
-      strokes: strokes,
+      strokes: strokes ?? [],
     ));
   }
 
@@ -65,44 +58,81 @@ class Glossary {
     if (index >= 0 && index < _entries.length) _entries.removeAt(index);
   }
 
+  // ========== FIX: Save strokes as JSON ==========
   Future<void> saveToPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     List<String> serialized = [];
+    
     for (var e in _entries) {
+      // Serialize strokes to JSON
+      List<Map<String, dynamic>> strokesJson = e.strokes.map((stroke) {
+        return {
+          'points': stroke.points.map((p) => {'dx': p.dx, 'dy': p.dy}).toList(),
+          'startTime': stroke.startTime.millisecondsSinceEpoch,
+          'endTime': stroke.endTime.millisecondsSinceEpoch,
+        };
+      }).toList();
+
       serialized.add(jsonEncode({
         'english': e.english,
         'spanish': e.spanish,
         'definition': e.definition,
         'synonym': e.synonym,
         'symbolImage': e.symbolImage != null ? base64Encode(e.symbolImage!) : null,
+        'strokes': strokesJson, // ADDED: Save strokes
       }));
     }
+    
     await prefs.setStringList('glossary_entries', serialized);
+    print('Saved ${_entries.length} entries to SharedPreferences');
   }
 
+  // ========== FIX: Load strokes from JSON ==========
   Future<void> loadFromPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     final stored = prefs.getStringList('glossary_entries');
+    
     if (stored != null) {
       _entries.clear();
       for (var s in stored) {
         var data = jsonDecode(s);
+        
+        // Deserialize strokes from JSON
+        List<Stroke> loadedStrokes = [];
+        if (data['strokes'] != null) {
+          for (var strokeJson in data['strokes']) {
+            List<Offset> points = (strokeJson['points'] as List)
+                .map((p) => Offset(p['dx'], p['dy']))
+                .toList();
+            
+            loadedStrokes.add(Stroke(
+              points: points,
+              startTime: DateTime.fromMillisecondsSinceEpoch(strokeJson['startTime']),
+              endTime: DateTime.fromMillisecondsSinceEpoch(strokeJson['endTime']),
+            ));
+          }
+        }
+
         _entries.add(GlossaryEntry(
           english: data['english'] ?? '',
           spanish: data['spanish'] ?? '',
           definition: data['definition'] ?? '',
           synonym: data['synonym'] ?? '',
           symbolImage: data['symbolImage'] != null ? base64Decode(data['symbolImage']) : null,
+          strokes: loadedStrokes, // ADDED: Load strokes
         ));
       }
+      print('Loaded ${_entries.length} entries from SharedPreferences');
+    } else {
+      print('No saved entries found');
     }
   }
   
-  /// Print all entries for testing
   void printAllEntries() {
     print("========== GLOSSARY LIST (${_entries.length} entries) ==========");
     for (int i = 0; i < _entries.length; i++) {
-      print("[$i] English: '${_entries[i].english}' | Spanish: '${_entries[i].spanish}' | Has Image: ${_entries[i].symbolImage != null}");
+      print("[$i] English: '${_entries[i].english}' | Spanish: '${_entries[i].spanish}' | "
+            "Has Image: ${_entries[i].symbolImage != null} | Strokes: ${_entries[i].strokes.length}");
     }
     print("==========================================================");
   }

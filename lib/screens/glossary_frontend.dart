@@ -28,6 +28,19 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   // Text input controller for editing cells
   final TextEditingController _editController = TextEditingController();
 
+  @override
+  void initState() {
+    super.initState();
+    _loadGlossary(); // Add this
+    glossary.printAllEntries(); // This should show spanish values
+  }
+
+  Future<void> _loadGlossary() async {
+    await glossary.loadFromPrefs();
+    setState(() {}); // Refresh UI
+    glossary.printAllEntries(); // Debug: see what loaded
+  }
+
   // ===================== CANVAS LOGIC =====================
   void _onPanStart(DragStartDetails details) {
     setState(() {
