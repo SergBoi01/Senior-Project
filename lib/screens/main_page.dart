@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:senior_project/screens/glossary_frontend.dart';
+import 'package:senior_project/screens/settings_screen.dart';
 import 'package:senior_project/screens/glossary_backend.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -148,9 +149,10 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   
   // ==================== SETTINGS ====================
   
-  static const double TIME_THRESHOLD_MS = 1000;    // Strokes within 500ms = same symbol // Made 1000 for slow emulator
-  static const double SPATIAL_THRESHOLD_PX = 2500; // Squared distance (50px * 50px)
-  static const double MIN_SYMBOL_SIZE = 100;      // Minimum area (px²) for valid symbol
+  // These are now loaded from user preferences instead of static constants
+  double TIME_THRESHOLD_MS = 1000;    // Strokes within this time = same symbol
+  double SPATIAL_THRESHOLD_PX = 2500; // Squared distance (50px * 50px)
+  double MIN_SYMBOL_SIZE = 100;       // Minimum area (px²) for valid symbol
   
   // ==================== STATE ====================
   Timer? _autoDetectTimer;
@@ -900,6 +902,17 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                 );
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.settings, color: Colors.white),
+              title: const Text('Settings', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const SettingsScreen()),
+                );
+              },
+            ),
             const Spacer(),
             const Divider(color: Colors.white),
             ListTile(
@@ -922,7 +935,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
           children: [
             // Left side - canvas
             Expanded(
-              flex: 50,
+              flex: 60,
               child: Material(
                 elevation: 4,
                 child: Column(
@@ -1020,7 +1033,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
             
             // Right side - spatial visualization
             Expanded(
-              flex: 50,
+              flex: 40,
               child: Container(
                 color: Colors.grey[400],
                 child: Column(
