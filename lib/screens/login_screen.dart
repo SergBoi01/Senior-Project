@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:senior_project/screens/main_page.dart';
 import 'package:senior_project/screens/registration_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:senior_project/screens/glossary_backend.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -33,9 +32,6 @@ class _LoginScreenState extends State<LoginScreen> {
       email: email,
       password: password,
     );
-
-    // Load saved glossary data
-    await Glossary().loadFromPrefs();
     
     Navigator.pushReplacement(
       context,
@@ -105,6 +101,20 @@ TextButton(
   },
   child: Text('Don\'t have an account? Create one'),
 ),
+            SizedBox(height: 20),
+            // Temporary bypass button for testing
+            TextButton(
+              onPressed: () {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (context) => const MainPage()),
+                );
+              },
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.grey,
+              ),
+              child: Text('Skip Login (Temporary)'),
+            ),
           ],
         ),
       ),

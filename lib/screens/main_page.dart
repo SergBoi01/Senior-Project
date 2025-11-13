@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:senior_project/screens/glossary_frontend.dart';
+import 'package:senior_project/screens/library_screen.dart';
 import 'package:senior_project/screens/login_screen.dart';
 import 'package:senior_project/screens/symbols_screen.dart';
-import 'package:senior_project/screens/glossary_backend.dart';
 
 import 'package:scribble/scribble.dart';
 import 'package:flutter/rendering.dart';
@@ -123,13 +122,13 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
             ),
             ListTile(
               leading: const Icon(Icons.book, color: Colors.white),
-              title: const Text('Glossary', style: TextStyle(color: Colors.white)),
+              title: const Text('Library', style: TextStyle(color: Colors.white)),
               trailing: const Icon(Icons.arrow_forward_ios, color: Colors.white),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => GlossaryScreen()),
+                  MaterialPageRoute(builder: (context) => LibraryScreen()),
                 );
               },
             ),
@@ -151,8 +150,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
             ListTile(
               leading: const Icon(Icons.logout, color: Colors.white),
               title: const Text('Logout', style: TextStyle(color: Colors.white)),
-              onTap: () async {
-                await Glossary().saveToPrefs();
+              onTap: () {
                 Navigator.pop(context);
                 Navigator.pushReplacement(
                   context,

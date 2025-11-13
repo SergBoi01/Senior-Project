@@ -3,16 +3,20 @@ import 'package:flutter/rendering.dart';
 import 'package:scribble/scribble.dart';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
-import 'glossary_backend.dart';
+import '../models/library_models.dart';
 
 class GlossaryScreen extends StatefulWidget {
+  final GlossaryItem? glossaryItem;
+
+  const GlossaryScreen({Key? key, this.glossaryItem}) : super(key: key);
+
   @override
   _GlossaryScreenState createState() => _GlossaryScreenState();
 }
 
 class _GlossaryScreenState extends State<GlossaryScreen> {
   // State Variables
-  final Glossary glossary = Glossary();
+  late GlossaryItem glossaryItem;
   int? editingIndex; // Currently editing row index
   bool showCanvas = false; // Toggle between table view and canvas view
   
@@ -23,6 +27,21 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   
   // Text input controller for editing cells
   final TextEditingController _editController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    // Use provided glossaryItem or create a new one if none provided
+    if (widget.glossaryItem != null) {
+      glossaryItem = widget.glossaryItem!;
+    } else {
+      // Fallback: create a temporary glossary item (for backward compatibility)
+      glossaryItem = GlossaryItem(
+        id: 'temp',
+        name: 'Glossary',
+      );
+    }
+  }
 
   // Canvas/Symbol Methods
   
@@ -46,7 +65,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     
     if (editingIndex != null && imageData != null) {
       setState(() {
-        glossary.entries[editingIndex!].symbolImage = imageData;
+        glossaryItem.entries[editingIndex!].symbolImage = imageData;
         showCanvas = false;
         editingIndex = null;
       });
@@ -60,7 +79,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   void _onCellTap(int rowIndex, int columnIndex) {
     if (columnIndex == 4) {
       // Symbol column, show drawing canvas or symbol preview
-      final entry = glossary.entries[rowIndex];
+      final entry = glossaryItem.entries[rowIndex];
       
       // If symbol already exists, show preview/replace dialog
       if (entry.symbolImage != null) {
@@ -145,16 +164,16 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
       // Get current value based on column
       switch (columnIndex) {
         case 0:
-          currentValue = glossary.entries[rowIndex].english;
+          currentValue = glossaryItem.entries[rowIndex].english;
           break;
         case 1:
-          currentValue = glossary.entries[rowIndex].spanish;
+          currentValue = glossaryItem.entries[rowIndex].spanish;
           break;
         case 2:
-          currentValue = glossary.entries[rowIndex].definition;
+          currentValue = glossaryItem.entries[rowIndex].definition;
           break;
         case 3:
-          currentValue = glossary.entries[rowIndex].synonym;
+          currentValue = glossaryItem.entries[rowIndex].synonym;
           break;
       }
       
@@ -217,21 +236,19 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                   // Update the appropriate field based on column
                   switch (columnIndex) {
                     case 0:
-                      glossary.entries[rowIndex].english = _editController.text;
+                      glossaryItem.entries[rowIndex].english = _editController.text;
                       break;
                     case 1:
-                      glossary.entries[rowIndex].spanish = _editController.text;
+                      glossaryItem.entries[rowIndex].spanish = _editController.text;
                       break;
                     case 2:
-                      glossary.entries[rowIndex].definition = _editController.text;
+                      glossaryItem.entries[rowIndex].definition = _editController.text;
                       break;
                     case 3:
-                      glossary.entries[rowIndex].synonym = _editController.text;
+                      glossaryItem.entries[rowIndex].synonym = _editController.text;
                       break;
                   }
                 });
-                // Auto save after editing
-                glossary.saveToPrefs();
                 Navigator.pop(context);
               },
               style: ElevatedButton.styleFrom(
@@ -250,15 +267,17 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   
   /// Adds a new empty entry to the glossary
   void _addNewEntry() {
-  setState(() {
-    glossary.addEntry('', '', '', '');
-    print("ADDED NEW ENTRY:");
-    glossary.printAllEntries();
-  });
-  // Auto save after adding
-  glossary.saveToPrefs();
+    setState(() {
+      glossaryItem.addEntry(GlossaryEntry(
+        english: '',
+        spanish: '',
+        definition: '',
+        synonym: '',
+      ));
+      print("ADDED NEW ENTRY:");
+    });
 
-  // Scroll to the bottom of the list to show the newly added entry
+    // Scroll to the bottom of the list to show the newly added entry
     Future.delayed(Duration(milliseconds: 100), () {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
@@ -276,7 +295,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("Glossary"),
+        title: Text(glossaryItem.name),
         backgroundColor: Colors.grey[800],
         iconTheme: IconThemeData(color: Colors.white),
       ),
@@ -308,9 +327,9 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
         Expanded(
           child: ListView.builder(
             controller: _scrollController,
-            itemCount: glossary.entries.length,
+            itemCount: glossaryItem.entries.length,
             itemBuilder: (context, index) {
-              final entry = glossary.entries[index];
+              final entry = glossaryItem.entries[index];
               return Container(
                 decoration: BoxDecoration(
                   border: Border(bottom: BorderSide(color: Colors.grey[400]!)),
@@ -329,11 +348,8 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                       onPressed: () {
                         setState(() {
                           print("DELETING ENTRY AT INDEX $index:");
-                          glossary.deleteEntry(index);
-                          glossary.printAllEntries();
+                          glossaryItem.deleteEntry(index);
                         });
-                        // Auto save after deleting
-                        glossary.saveToPrefs();
                       },
                     ),
                   ],
