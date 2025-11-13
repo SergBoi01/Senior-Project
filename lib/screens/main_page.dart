@@ -700,6 +700,39 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
 
   // ==================== USER CORRECTION SYSTEM ====================
 
+  void _showCorrectionDialog(DetectedSymbol symbol) async {
+    final glossary = Glossary();
+    await glossary.loadFromPrefs();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Correct Detection'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Detected as: ${symbol.label}'),
+            const SizedBox(height: 16),
+            const Text('What should it be?'),
+            const SizedBox(height: 8),
+            ...glossary.entries.map((entry) {
+              return ListTile(
+                title: Text('${entry.english} → ${entry.spanish}'),
+                onTap: () {
+                  onUserCorrection(symbol, entry.spanish);
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Learned! Will remember this variation.')),
+                  );
+                },
+              );
+            }).toList(),
+          ],
+        ),
+      ),
+    );
+  }
+
   // Call this when user manually corrects a detection
   void onUserCorrection(DetectedSymbol wrongDetection, String correctLabel) {
     final correction = UserCorrection(
@@ -781,6 +814,15 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
         ),
         // Switches between returning Spanish and English
         actions: [
+          // Delete page button in top right
+          IconButton(
+            icon: const Icon(Icons.delete_outline, color: Colors.red),
+            onPressed: () {
+              setState(() => notebook.deleteCurrentPage());
+            },
+            tooltip: 'Delete Page',
+          ),
+          const SizedBox(width: 8),
           Padding(
             padding: const EdgeInsets.only(right: 16.0),
             child: Row(
@@ -880,7 +922,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
           children: [
             // Left side - canvas
             Expanded(
-              flex: 80,
+              flex: 50,
               child: Material(
                 elevation: 4,
                 child: Column(
@@ -902,45 +944,47 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                       ),
                     ),
 
-                    // Notebook buttons
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        ElevatedButton(
-                          onPressed: () {
-                            setState(() => notebook.prevPage());
-                          },
-                          child: const Text('Previous Page'),
-                        ),
-                        const SizedBox(width: 8),
-                        ElevatedButton(
-                          onPressed: () {
-                            setState(() => notebook.nextPage());
-                          },
-                          child: const Text('Next Page'),
-                        ),
-                        const SizedBox(width: 8),
-                        ElevatedButton(
-                          onPressed: () {
-                            setState(() => notebook.newPageAfterCurrent());
-                          },
-                          child: const Text('New Page'),
-                        ),
-                        const SizedBox(width: 8),
-                        ElevatedButton(
-                          onPressed: () {
-                            setState(() => notebook.deleteCurrentPage());
-                          },
-                          child: const Text('Delete Page'),
-                        ),
-                        const SizedBox(width: 8),
-                        ElevatedButton(
-                          onPressed: () {
-                            setState(() => notebook.restoreLastDeleted());
-                          },
-                          child: const Text('Restore Page'),
-                        ),
-                      ],
+                    // Navigation buttons and page counter
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          // Previous page arrow
+                          IconButton(
+                            icon: const Icon(Icons.arrow_back, size: 28),
+                            onPressed: () {
+                              setState(() => notebook.prevPage());
+                            },
+                            tooltip: 'Previous Page',
+                          ),
+                          const SizedBox(width: 20),
+                          // Page counter
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.grey[300],
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              'Page ${notebook.currentIndex + 1}/${notebook.pages.length}',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 20),
+                          // Next page arrow
+                          IconButton(
+                            icon: const Icon(Icons.arrow_forward, size: 28),
+                            onPressed: () {
+                              setState(() => notebook.nextPage());
+                            },
+                            tooltip: 'Next Page',
+                          ),
+                        ],
+                      ),
                     ),
 
 
@@ -974,9 +1018,9 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
             
             const VerticalDivider(width: 1, color: Colors.grey),
             
-            // Right side - results
+            // Right side - spatial visualization
             Expanded(
-              flex: 20,
+              flex: 50,
               child: Container(
                 color: Colors.grey[400],
                 child: Column(
@@ -992,62 +1036,20 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                       child: detectedSymbols.isEmpty
                         ? const Center(
                             child: Text(
-                              'Draw symbols and\npress Detect',
+                              'Draw symbols to see\nthem detected here',
                               textAlign: TextAlign.center,
                               style: TextStyle(color: Colors.grey),
                             ),
                           )
-                        : ListView.builder(
-                            padding: const EdgeInsets.all(8.0),
-                            itemCount: detectedSymbols.length,
-                            itemBuilder: (context, index) {
-
-                              void _showCorrectionDialog(DetectedSymbol symbol) async {
-                                final glossary = Glossary();
-                                await glossary.loadFromPrefs();
-
-                                showDialog(
-                                  context: context,
-                                  builder: (context) => AlertDialog(
-                                    title: Text('Correct Detection'),
-                                    content: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text('Detected as: ${symbol.label}'),
-                                        SizedBox(height: 16),
-                                        Text('What should it be?'),
-                                        SizedBox(height: 8),
-                                        ...glossary.entries.map((entry) {
-                                          return ListTile(
-                                            title: Text('${entry.english} → ${entry.spanish}'),
-                                            onTap: () {
-                                              onUserCorrection(symbol, entry.spanish);
-                                              Navigator.pop(context);
-                                              ScaffoldMessenger.of(context).showSnackBar(
-                                                SnackBar(content: Text('Learned! Will remember this variation.')),
-                                              );
-                                            },
-                                          );
-                                        }).toList(),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              }
-
-                              final symbol = detectedSymbols[index];
-                              
-                              return Card(
-                                child: ListTile(
-                                  title: Text(symbol.label),
-                                  subtitle: Text('Tap to correct if wrong'),
-                                  onTap: () {
-                                    // Show correction dialog
-                                    _showCorrectionDialog(symbol);
-                                  },
-                                ),
-                              );
-                            }   
+                        : DetectionVisualizer(
+                            detectedSymbols: detectedSymbols,
+                            canvasSize: Size(
+                              MediaQuery.of(context).size.width * 0.6,
+                              MediaQuery.of(context).size.height - 200,
+                            ),
+                            onSymbolTap: (symbol) {
+                              _showCorrectionDialog(symbol);
+                            },
                           ),
                     ),
                   ],
@@ -1058,6 +1060,150 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
         ),
       ),
     );
+  }
+}
+
+// ==================== DETECTION VISUALIZER ====================
+
+class DetectionVisualizer extends StatelessWidget {
+  final List<DetectedSymbol> detectedSymbols;
+  final Size canvasSize;
+  final Function(DetectedSymbol) onSymbolTap;
+
+  const DetectionVisualizer({
+    super.key,
+    required this.detectedSymbols,
+    required this.canvasSize,
+    required this.onSymbolTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final visualizerSize = Size(constraints.maxWidth, constraints.maxHeight);
+        
+        return GestureDetector(
+          onTapUp: (details) {
+            _handleTap(details.localPosition, visualizerSize);
+          },
+          child: CustomPaint(
+            size: visualizerSize,
+            painter: DetectionPainter(
+              detectedSymbols: detectedSymbols,
+              canvasSize: canvasSize,
+              visualizerSize: visualizerSize,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _handleTap(Offset tapPosition, Size visualizerSize) {
+    // Convert tap position to canvas coordinates
+    final scaleX = canvasSize.width / visualizerSize.width;
+    final scaleY = canvasSize.height / visualizerSize.height;
+    
+    final canvasX = tapPosition.dx * scaleX;
+    final canvasY = tapPosition.dy * scaleY;
+
+    // Find which symbol was tapped
+    for (var symbol in detectedSymbols) {
+      if (canvasX >= symbol.x1 && 
+          canvasX <= symbol.x2 && 
+          canvasY >= symbol.y1 && 
+          canvasY <= symbol.y2) {
+        onSymbolTap(symbol);
+        break;
+      }
+    }
+  }
+}
+
+class DetectionPainter extends CustomPainter {
+  final List<DetectedSymbol> detectedSymbols;
+  final Size canvasSize;
+  final Size visualizerSize;
+
+  DetectionPainter({
+    required this.detectedSymbols,
+    required this.canvasSize,
+    required this.visualizerSize,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Calculate scale factors
+    final scaleX = visualizerSize.width / canvasSize.width;
+    final scaleY = visualizerSize.height / canvasSize.height;
+
+    // Draw background grid (optional, for reference)
+    final gridPaint = Paint()
+      ..color = Colors.grey.withOpacity(0.1)
+      ..strokeWidth = 1;
+
+    for (int i = 0; i < 10; i++) {
+      final x = (visualizerSize.width / 10) * i;
+      canvas.drawLine(
+        Offset(x, 0),
+        Offset(x, visualizerSize.height),
+        gridPaint,
+      );
+    }
+
+    for (int i = 0; i < 10; i++) {
+      final y = (visualizerSize.height / 10) * i;
+      canvas.drawLine(
+        Offset(0, y),
+        Offset(visualizerSize.width, y),
+        gridPaint,
+      );
+    }
+
+    // Draw each detected symbol
+    for (var symbol in detectedSymbols) {
+      // Scale coordinates to visualizer space
+      final x1 = symbol.x1 * scaleX;
+      final y1 = symbol.y1 * scaleY;
+      final x2 = symbol.x2 * scaleX;
+      final y2 = symbol.y2 * scaleY;
+
+      final rect = Rect.fromLTRB(x1, y1, x2, y2);
+
+      // Calculate font size based on the actual symbol dimensions
+      // Use the smaller dimension to ensure text fits
+      final minDimension = rect.width < rect.height ? rect.width : rect.height;
+      final fontSize = (minDimension * 0.7).clamp(8.0, 32.0);
+
+      // Draw label
+      final textPainter = TextPainter(
+        text: TextSpan(
+          text: symbol.label,
+          style: TextStyle(
+            color: Colors.black,
+            fontSize: fontSize,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      );
+
+      textPainter.layout();
+
+      // Center text in bounding box
+      final textX = x1 + (rect.width - textPainter.width) / 2;
+      final textY = y1 + (rect.height - textPainter.height) / 2;
+
+      textPainter.paint(canvas, Offset(textX, textY));
+    }
+  }
+
+  @override
+  bool shouldRepaint(DetectionPainter oldDelegate) {
+    return oldDelegate.detectedSymbols != detectedSymbols ||
+           oldDelegate.canvasSize != canvasSize ||
+           oldDelegate.visualizerSize != visualizerSize;
   }
 }
 

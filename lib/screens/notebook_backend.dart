@@ -116,6 +116,4 @@ class NotebookManager {
       currentIndex = 0;
     }
   }
-
-
 }

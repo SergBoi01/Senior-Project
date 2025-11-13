@@ -5,12 +5,13 @@ import 'package:flutter/material.dart';
 import 'main_page.dart'; // import Stroke class
 
 class GlossaryEntry {
+
   String english;
   String spanish;
   String definition;
   String synonym;  
   Uint8List? symbolImage; // For display
-  List<Stroke> strokes;   // For comparison (CHANGED: removed nullable)
+  List<Stroke> strokes;   // For comparison 
 
   GlossaryEntry({
     required this.english,
@@ -31,8 +32,8 @@ class GlossaryEntry {
 }
 
 class Glossary {
-  bool isChecked;      
-  String name;         
+  bool isChecked;   // Decided by user
+  String name;      // User can change the name
 
   final List<GlossaryEntry> _entries = [];
 
@@ -58,8 +59,9 @@ class Glossary {
     if (index >= 0 && index < _entries.length) _entries.removeAt(index);
   }
 
-  // ========== FIX: Save strokes as JSON ==========
+  // Simple save for now. Will be updated.
   Future<void> saveToPrefs() async {
+    
     final prefs = await SharedPreferences.getInstance();
     List<String> serialized = [];
     
@@ -87,7 +89,7 @@ class Glossary {
     print('Saved ${_entries.length} entries to SharedPreferences');
   }
 
-  // ========== FIX: Load strokes from JSON ==========
+  // Simple load for now. Will be updated.
   Future<void> loadFromPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     final stored = prefs.getStringList('glossary_entries');
