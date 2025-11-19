@@ -114,7 +114,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
       });
       _clearCanvas();
       
-      await glossary.saveToPrefs();
+      await glossary.saveToFirestore();
       print('Saved symbol for entry $editingIndex');
     }
   }
@@ -158,7 +158,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                     entry.strokes = [];
                   });
                   Navigator.pop(context);
-                  glossary.saveToPrefs();
+                  glossary.saveToFirestore();
                 },
                 style: TextButton.styleFrom(foregroundColor: Colors.red),
                 child: Text('Delete Symbol'),
@@ -248,7 +248,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                 });
                 
                 // SAVE IMMEDIATELY
-                await glossary.saveToPrefs();
+                await glossary.saveToFirestore();
                 print('Saved text edit for entry $rowIndex, column $columnIndex');
                 
 
@@ -273,7 +273,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     });
 
     // SAVE IMMEDIATELY
-    await glossary.saveToPrefs();
+    await glossary.saveToFirestore();
     print('Saved new entry');
 
     Future.delayed(Duration(milliseconds: 100), () {
@@ -342,7 +342,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                         });
 
                         // SAVE IMMEDIATELY
-                        await glossary.saveToPrefs();
+                        await glossary.saveToFirestore();
                         print('Saved after deleting entry $index');
                       },
                     ),

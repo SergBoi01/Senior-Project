@@ -53,7 +53,6 @@ class NotebookManager {
   void newPageAfterCurrent() {
     pages.insert(currentIndex + 1, NotebookPage());
     currentIndex++;
-    saveToPrefs();
   }
 
   void nextPage() {
@@ -62,13 +61,11 @@ class NotebookManager {
       pages.add(NotebookPage());
     }
     currentIndex++;
-    saveToPrefs();
   }
 
   void prevPage() {
     if (currentIndex > 0) {
       currentIndex--;
-      saveToPrefs();
     }
     
   }
@@ -82,40 +79,12 @@ class NotebookManager {
         pages.add(NotebookPage());
         currentIndex = 0;
       }
-      saveToPrefs();
     }
   }
 
   void restoreLastDeleted() {
     if (deletedPages.isNotEmpty) {
       pages.insert(currentIndex, deletedPages.removeAt(0));
-      saveToPrefs();
     }
   }
-
-  Future<void> saveToPrefs() async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = {
-      'pages': pages.map((p) => p.toJson()).toList(),
-      'currentIndex': currentIndex,
-    };
-    await prefs.setString('notebook_data', jsonEncode(data));
-  }
-
-  Future<void> loadFromPrefs() async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString('notebook_data');
-    if (saved != null) {
-      final decoded = jsonDecode(saved);
-      pages = (decoded['pages'] as List)
-          .map((p) => NotebookPage.fromJson(p))
-          .toList();
-      currentIndex = decoded['currentIndex'] ?? 0;
-    } else {
-      pages = [NotebookPage()];
-      currentIndex = 0;
-    }
-  }
-
-
 }

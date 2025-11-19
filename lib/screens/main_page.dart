@@ -3,13 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:senior_project/screens/glossary_frontend.dart';
 import 'package:senior_project/screens/glossary_backend.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:senior_project/screens/notebook_backend.dart';
 import 'package:senior_project/screens/login_screen.dart';
 import 'package:senior_project/screens/symbols_screen.dart';
+import 'package:senior_project/services/firestore_service.dart';
 import 'dart:math' as math;
-import 'dart:convert';
+
 
 
 // ==================== ADAPTIVE LEARNING SYSTEM ====================
@@ -132,12 +132,10 @@ class DetectedSymbol {
 
 class MainPage extends StatefulWidget {
   final Glossary glossary;
-  final List<UserCorrection> userCorrections;
 
   const MainPage({
     super.key,
     required this.glossary,
-    required this.userCorrections,
   }); 
 
   @override
@@ -153,17 +151,18 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   static const double MIN_SYMBOL_SIZE = 100;      // Minimum area (px²) for valid symbol
   
   // ==================== STATE ====================
+  final FirestoreService _firestoreService = FirestoreService();
   Timer? _autoDetectTimer;
   bool _isDetecting = false;
   int _lastStrokeCount = 0;
 
-  final notebook = NotebookManager();
+  NotebookManager notebook = NotebookManager();
 
 
   bool showSpanish = true; // true = Spanish, false = English
 
   late Glossary glossary;
-  late List<UserCorrection> userCorrections;
+  List<UserCorrection> userCorrections = [];
   
   List<DetectedSymbol> detectedSymbols = [];
   List<Offset> currentStrokePoints = [];
@@ -233,6 +232,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
         notebook.currentPage.strokes.add(stroke);
       });
 
+      _saveNotebook();
       print('Stroke completed: ${stroke.points.length} points');
       
       currentStrokePoints = [];
@@ -632,6 +632,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
       currentStrokeStartTime = null;
       _lastStrokeCount = 0; // RESET COUNTER
     });
+    _saveNotebook();
     print("Canvas cleared");
   }
 
@@ -640,6 +641,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
       setState(() {
         notebook.currentPage.strokes.removeLast();
       });
+      _saveNotebook();
       print("Undo stroke");
     }
   }
@@ -723,13 +725,9 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   @override
   void initState() {
     super.initState();
+    _loadData();
 
-    // Loads saves pages (if any)
-    notebook.loadFromPrefs();
-
-    // Use the data passed from main
     glossary = widget.glossary;
-    userCorrections = widget.userCorrections;
 
     _animationController = AnimationController(
       vsync: this,
@@ -737,19 +735,37 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     );
 
     _startAutoDetection(); // START AUTO-DETECTION
-
-    print('MainPage initialized with ${glossary.entries.length} glossary entries');
-    print('MainPage initialized with ${userCorrections.length} corrections');
-
   }
 
+  void _loadData() async {
+    await _loadNotebook();
+    await _loadUserCorrections();
+  }
+
+  Future<void> _loadNotebook() async {
+    final loadedNotebook = await _firestoreService.loadNotebook();
+    setState(() {
+      notebook = loadedNotebook;
+    });
+    print('Notebook loaded with ${notebook.pages.length} pages from Firestore');
+  }
+
+  Future<void> _loadUserCorrections() async {
+    final corrections = await _firestoreService.loadUserCorrections();
+    setState(() {
+      userCorrections = corrections;
+    });
+    print('Loaded ${corrections.length} user corrections from Firestore');
+  }
 
   Future<void> _saveUserCorrections() async {
-    final prefs = await SharedPreferences.getInstance();
-    final serialized = userCorrections.map((c) => jsonEncode(c.toJson())).toList();
-    await prefs.setStringList('user_corrections', serialized);
-    print('Saved ${userCorrections.length} user corrections');
+    await _firestoreService.saveUserCorrections(userCorrections);
+    print('Saved ${userCorrections.length} user corrections to Firestore');
+  }
 
+  Future<void> _saveNotebook() async {
+    await _firestoreService.saveNotebook(notebook);
+    print('Saved notebook to Firestore');
   }
 
   @override
@@ -909,6 +925,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                         ElevatedButton(
                           onPressed: () {
                             setState(() => notebook.prevPage());
+                            _saveNotebook();
                           },
                           child: const Text('Previous Page'),
                         ),
@@ -916,6 +933,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                         ElevatedButton(
                           onPressed: () {
                             setState(() => notebook.nextPage());
+                            _saveNotebook();
                           },
                           child: const Text('Next Page'),
                         ),
@@ -923,6 +941,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                         ElevatedButton(
                           onPressed: () {
                             setState(() => notebook.newPageAfterCurrent());
+                            _saveNotebook();
                           },
                           child: const Text('New Page'),
                         ),
@@ -930,6 +949,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                         ElevatedButton(
                           onPressed: () {
                             setState(() => notebook.deleteCurrentPage());
+                            _saveNotebook();
                           },
                           child: const Text('Delete Page'),
                         ),
@@ -937,6 +957,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                         ElevatedButton(
                           onPressed: () {
                             setState(() => notebook.restoreLastDeleted());
+                            _saveNotebook();
                           },
                           child: const Text('Restore Page'),
                         ),
@@ -1004,7 +1025,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
 
                               void _showCorrectionDialog(DetectedSymbol symbol) async {
                                 final glossary = Glossary();
-                                await glossary.loadFromPrefs();
+                                await glossary.loadFromFirestore();
 
                                 showDialog(
                                   context: context,
