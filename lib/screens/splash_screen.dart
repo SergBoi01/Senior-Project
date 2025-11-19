@@ -1,11 +1,18 @@
-
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:senior_project/screens/login_screen.dart';
 import 'package:senior_project/screens/main_page.dart';
+import 'package:senior_project/screens/glossary_backend.dart';
 
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+  final Glossary glossary;
+  final List<UserCorrection> userCorrections;
+
+  const SplashScreen({
+    super.key,
+    required this.glossary,
+    required this.userCorrections,
+  });
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
@@ -20,7 +27,10 @@ class _SplashScreenState extends State<SplashScreen> {
       () => Navigator.pushReplacement(
         context,
         PageRouteBuilder(
-          pageBuilder: (context, animation, secondaryAnimation) => const LoginScreen(),
+          pageBuilder: (context, animation, secondaryAnimation) => LoginScreen(
+            glossary: widget.glossary,
+            userCorrections: widget.userCorrections,
+          ),
           transitionDuration: const Duration(milliseconds: 700),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             return FadeTransition(
@@ -35,9 +45,9 @@ class _SplashScreenState extends State<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    return Scaffold(
       body: Center(
-        child: FlutterLogo(size: 200),
+        child: Image.asset('assets/lingua_flow.png'),
       ),
     );
   }

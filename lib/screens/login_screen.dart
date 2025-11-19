@@ -2,9 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:senior_project/screens/main_page.dart';
 import 'package:senior_project/screens/registration_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:senior_project/screens/glossary_backend.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  final Glossary glossary;
+  final List<UserCorrection> userCorrections;
+
+  const LoginScreen({
+    super.key,
+    required this.glossary,
+    required this.userCorrections,
+  });
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -17,32 +25,50 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isPasswordVisible = false;
 
   void login() async {
-  String email = emailController.text.trim();
-  String password = passwordController.text;
+    String email = emailController.text.trim();
+    String password = passwordController.text;
 
-  if (email.isEmpty || password.isEmpty) {
-    setState(() {
-      errorMessage = 'Please enter both email and password';
-    });
-    return;
+    if (email.isEmpty || password.isEmpty) {
+      setState(() {
+        errorMessage = 'Please enter both email and password';
+      });
+      return;
+    }
+
+    try {
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => MainPage(
+            glossary: widget.glossary,
+            userCorrections: widget.userCorrections,
+          ),
+        ),
+      );
+    } catch (e) {
+      setState(() {
+        errorMessage = 'Invalid email or password';
+      });
+    }
   }
 
-  try {
-    await FirebaseAuth.instance.signInWithEmailAndPassword(
-      email: email,
-      password: password,
-    );
-    
+  void bypassLogin() {
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (context) => const LoginScreen()),
+      MaterialPageRoute(
+        builder: (context) => MainPage(
+          glossary: widget.glossary,
+          userCorrections: widget.userCorrections,
+        ),
+      ),
     );
-  } catch (e) {
-    setState(() {
-      errorMessage = 'Invalid email or password';
-    });
   }
-}
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -63,23 +89,23 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             SizedBox(height: 20),
             TextField(
-  controller: passwordController,
-  decoration: InputDecoration(
-    labelText: 'Password',
-    border: OutlineInputBorder(),
-    suffixIcon: IconButton(
-      icon: Icon(
-        _isPasswordVisible ? Icons.visibility : Icons.visibility_off,
-      ),
-      onPressed: () {
-        setState(() {
-          _isPasswordVisible = !_isPasswordVisible;
-        });
-      },
-    ),
-  ),
-  obscureText: !_isPasswordVisible,
-),
+              controller: passwordController,
+              decoration: InputDecoration(
+                labelText: 'Password',
+                border: OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _isPasswordVisible ? Icons.visibility : Icons.visibility_off,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _isPasswordVisible = !_isPasswordVisible;
+                    });
+                  },
+                ),
+              ),
+              obscureText: !_isPasswordVisible,
+            ),
             SizedBox(height: 10),
             if (errorMessage.isNotEmpty)
               Text(
@@ -92,15 +118,23 @@ class _LoginScreenState extends State<LoginScreen> {
               child: const Text('Login'),
             ),
             SizedBox(height: 10),
-TextButton(
-  onPressed: () {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => RegistrationScreen()),
-    );
-  },
-  child: Text('Don\'t have an account? Create one'),
-),
+            TextButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => RegistrationScreen()),
+                );
+              },
+              child: Text('Don\'t have an account? Create one'),
+            ),
+            SizedBox(height: 10),
+            ElevatedButton(
+              onPressed: bypassLogin,
+              child: const Text('Bypass Login (Dev)'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.grey,
+              ),
+            ),
           ],
         ),
       ),

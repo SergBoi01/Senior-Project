@@ -922,7 +922,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                 Navigator.pop(context);
                 Navigator.pushReplacement(
                   context,
-                  MaterialPageRoute(builder: (context) => const LoginScreen()),
+                  MaterialPageRoute(builder: (context) => LoginScreen(glossary: glossary, userCorrections: userCorrections,)),
                 );
               },
             ),
