@@ -935,7 +935,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
           children: [
             // Left side - canvas
             Expanded(
-              flex: 60,
+              flex: 50,
               child: Material(
                 elevation: 4,
                 child: Column(
@@ -1033,7 +1033,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
             
             // Right side - spatial visualization
             Expanded(
-              flex: 40,
+              flex: 50,
               child: Container(
                 color: Colors.grey[400],
                 child: Column(
