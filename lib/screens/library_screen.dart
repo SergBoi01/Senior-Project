@@ -8,7 +8,7 @@ import 'dart:math';
 class LibraryScreen extends StatefulWidget {
   final FolderItem? initialFolder; // For navigating into a specific folder
 
-  const LibraryScreen({Key? key, this.initialFolder}) : super(key: key);
+  const LibraryScreen({super.key, this.initialFolder});
 
   @override
   _LibraryScreenState createState() => _LibraryScreenState();
@@ -16,13 +16,16 @@ class LibraryScreen extends StatefulWidget {
 
 class _LibraryScreenState extends State<LibraryScreen> {
   // Root level storage - only folders (glossaries are inside folders)
-  final List<FolderItem> _rootFolders = [];
+  List<FolderItem> _rootFolders = [];
 
   // Folder navigation stack to track current location
   final List<FolderItem> _folderStack = [];
 
   // Firestore service
   final GlossaryService _glossaryService = GlossaryService();
+  
+  // Loading state
+  bool _isLoading = false;
 
   // Get current folder (null if at root)
   FolderItem? get _currentFolder => _folderStack.isEmpty ? null : _folderStack.last;
@@ -44,6 +47,66 @@ class _LibraryScreenState extends State<LibraryScreen> {
     // If navigating into a specific folder, set up the stack
     if (widget.initialFolder != null) {
       _folderStack.add(widget.initialFolder!);
+    } else {
+      // Load library structure from Firestore
+      _loadLibrary();
+    }
+  }
+
+  /// Load library structure from Firestore
+  Future<void> _loadLibrary() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final rootFolders = await _glossaryService.loadRootFolders();
+      setState(() {
+        _rootFolders = rootFolders;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load library: $e')),
+        );
+      }
+    }
+  }
+
+  /// Save library structure to Firestore
+  Future<void> _saveLibrary() async {
+    try {
+      // Save all root folders (which will recursively save their children)
+      for (var folder in _rootFolders) {
+        await _saveFolderRecursive(folder);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save library: $e')),
+        );
+      }
+    }
+  }
+
+  /// Recursively save a folder and all its children
+  Future<void> _saveFolderRecursive(FolderItem folder) async {
+    // Save the folder itself
+    await _glossaryService.saveFolder(folder);
+    
+    // Save all children
+    for (var child in folder.children) {
+      if (child is FolderItem) {
+        // Recursively save subfolders
+        await _saveFolderRecursive(child);
+      } else if (child is GlossaryItem) {
+        // Save glossary (already handled when created, but ensure it's saved)
+        await _glossaryService.saveGlossary(child);
+      }
     }
   }
 
@@ -93,7 +156,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             child: Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               if (nameController.text.trim().isNotEmpty) {
                 final folder = FolderItem(
                   id: _generateId(),
@@ -110,6 +173,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     _currentFolder!.addChild(folder);
                   }
                 });
+                
+                // Save folder to Firestore
+                try {
+                  await _glossaryService.saveFolder(folder);
+                  // Save entire library structure to ensure consistency
+                  await _saveLibrary();
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Failed to save folder: $e')),
+                    );
+                  }
+                }
                 
                 Navigator.pop(context);
               }
@@ -172,6 +248,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 setState(() {
                   _currentFolder!.addChild(glossary);
                 });
+                // Save parent folder to update its children list
+                await _glossaryService.saveFolder(_currentFolder!);
                 Navigator.pop(context);
               } catch (e) {
                 Navigator.pop(context);
@@ -248,15 +326,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   item.name = nameController.text.trim();
                 });
                 
-                // If it's a glossary, save to Firestore
-                if (item is GlossaryItem) {
-                  try {
+                // Save to Firestore
+                try {
+                  if (item is GlossaryItem) {
                     await _glossaryService.saveGlossary(item);
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Failed to save glossary: $e')),
-                    );
+                  } else if (item is FolderItem) {
+                    await _glossaryService.saveFolder(item);
+                    // Save entire library to ensure consistency
+                    await _saveLibrary();
                   }
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Failed to save: $e')),
+                  );
                 }
                 
                 Navigator.pop(context);
@@ -320,7 +402,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
           onPressed: _navigateBack,
         ),
       ),
-      body: Column(
+      body: _isLoading
+          ? Center(child: CircularProgressIndicator())
+          : Column(
         children: [
           // Cards section - show folders and glossaries
           if (_currentItems.isNotEmpty)
