@@ -8,12 +8,12 @@ class LibraryItemCard extends StatelessWidget {
   final Function(bool)? onCheckboxChanged;
 
   const LibraryItemCard({
-    Key? key,
+    super.key,
     required this.item,
     required this.onTap,
     this.onRename,
     this.onCheckboxChanged,
-  }) : super(key: key);
+  });
 
   bool get isFolder => item is FolderItem;
   bool get isChecked => item.isChecked;

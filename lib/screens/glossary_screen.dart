@@ -9,7 +9,7 @@ import '../services/glossary_service.dart';
 class GlossaryScreen extends StatefulWidget {
   final GlossaryItem? glossaryItem;
 
-  const GlossaryScreen({Key? key, this.glossaryItem}) : super(key: key);
+  const GlossaryScreen({super.key, this.glossaryItem});
 
   @override
   _GlossaryScreenState createState() => _GlossaryScreenState();
@@ -483,6 +483,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
             onPressed: _isSaving ? null : _addNewEntry,
             backgroundColor: Colors.black,
             foregroundColor: Colors.white,
+            tooltip: 'Add new entry',
             child: _isSaving
                 ? SizedBox(
                     width: 20,
@@ -493,7 +494,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                     ),
                   )
                 : Icon(Icons.add),
-            tooltip: 'Add new entry',
           ),
         ),
       ],

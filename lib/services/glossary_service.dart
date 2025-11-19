@@ -72,15 +72,25 @@ class GlossaryService {
     if (_userId == null) throw Exception('User not logged in');
     
     try {
-      final querySnapshot = await _firestore
-          .collection(_getEntriesPath(glossaryId))
-          .orderBy('updatedAt', descending: true)
-          .get();
+      QuerySnapshot querySnapshot;
+      try {
+        // Try to order by updatedAt first
+        querySnapshot = await _firestore
+            .collection(_getEntriesPath(glossaryId))
+            .orderBy('updatedAt', descending: true)
+            .get();
+      } catch (e) {
+        // If ordering fails (e.g., no index or no updatedAt field), just get all entries
+        querySnapshot = await _firestore
+            .collection(_getEntriesPath(glossaryId))
+            .get();
+      }
 
       List<GlossaryEntry> entries = [];
       
       for (var doc in querySnapshot.docs) {
-        final data = doc.data();
+        final data = doc.data() as Map<String, dynamic>?;
+        if (data == null) continue;
         
         // Download symbol image if URL exists
         Uint8List? symbolImage;
@@ -177,7 +187,8 @@ class GlossaryService {
   }
 
   /// Load a glossary from Firestore
-  Future<GlossaryItem?> loadGlossary(String glossaryId) async {
+  /// [loadEntries] - if true, loads all entries (default: false for performance)
+  Future<GlossaryItem?> loadGlossary(String glossaryId, {bool loadEntries = false}) async {
     if (_userId == null) throw Exception('User not logged in');
     
     try {
@@ -190,14 +201,17 @@ class GlossaryService {
 
       final data = doc.data()!;
       
-      // Load entries
-      final entries = await loadEntries(glossaryId);
+      // Only load entries if requested (for performance when loading library structure)
+      List<GlossaryEntry> glossaryEntries = [];
+      if (loadEntries) {
+        glossaryEntries = await this.loadEntries(glossaryId);
+      }
 
       return GlossaryItem(
         id: glossaryId,
         name: data['name'] ?? '',
         parentId: data['parentId'],
-        entries: entries,
+        entries: glossaryEntries,
       );
     } catch (e) {
       throw Exception('Failed to load glossary: $e');
@@ -247,22 +261,33 @@ class GlossaryService {
           .get();
       
       for (var subfolderDoc in subfoldersSnapshot.docs) {
-        final subfolder = await loadFolder(subfolderDoc.id);
-        if (subfolder != null) {
-          children.add(subfolder);
+        try {
+          final subfolder = await loadFolder(subfolderDoc.id);
+          if (subfolder != null) {
+            children.add(subfolder);
+          }
+        } catch (e) {
+          debugPrint('Error loading subfolder ${subfolderDoc.id}: $e');
+          // Continue loading other folders even if one fails
         }
       }
       
-      // Load glossaries in this folder
+      // Load glossaries in this folder (without entries for performance)
       final glossariesSnapshot = await _firestore
           .collection('users/$_userId/glossaries')
           .where('parentId', isEqualTo: folderId)
           .get();
       
       for (var glossaryDoc in glossariesSnapshot.docs) {
-        final glossary = await loadGlossary(glossaryDoc.id);
-        if (glossary != null) {
-          children.add(glossary);
+        try {
+          // Load glossary without entries for better performance
+          final glossary = await loadGlossary(glossaryDoc.id, loadEntries: false);
+          if (glossary != null) {
+            children.add(glossary);
+          }
+        } catch (e) {
+          debugPrint('Error loading glossary ${glossaryDoc.id}: $e');
+          // Continue loading other glossaries even if one fails
         }
       }
 

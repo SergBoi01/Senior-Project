@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import '../models/library_models.dart';
 import '../widgets/library_item_card.dart';
 import '../services/glossary_service.dart';
@@ -55,21 +56,26 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   /// Load library structure from Firestore
   Future<void> _loadLibrary() async {
+    if (!mounted) return;
+    
     setState(() {
       _isLoading = true;
     });
 
     try {
       final rootFolders = await _glossaryService.loadRootFolders();
-      setState(() {
-        _rootFolders = rootFolders;
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
       if (mounted) {
+        setState(() {
+          _rootFolders = rootFolders;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading library: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to load library: $e')),
         );
@@ -248,9 +254,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 setState(() {
                   _currentFolder!.addChild(glossary);
                 });
-                // Save parent folder to update its children list
-                await _glossaryService.saveFolder(_currentFolder!);
                 Navigator.pop(context);
+                // Show success message
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Glossary created successfully')),
+                );
               } catch (e) {
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
