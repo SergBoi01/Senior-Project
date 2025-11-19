@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 /// Represents a glossary entry with text fields and optional symbol image
 class GlossaryEntry {
+  String? id; // Firestore document ID (null for new entries)
   String english;
   String spanish;
   String definition;
@@ -10,6 +11,7 @@ class GlossaryEntry {
 
   // Main constructor
   GlossaryEntry({
+    this.id,
     required this.english,
     required this.spanish,
     required this.definition,

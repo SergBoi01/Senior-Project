@@ -4,6 +4,7 @@ import 'package:scribble/scribble.dart';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import '../models/library_models.dart';
+import '../services/glossary_service.dart';
 
 class GlossaryScreen extends StatefulWidget {
   final GlossaryItem? glossaryItem;
@@ -20,6 +21,14 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   int? editingIndex; // Currently editing row index
   bool showCanvas = false; // Toggle between table view and canvas view
   
+  // Loading and error states
+  bool _isLoading = false;
+  bool _isSaving = false;
+  String? _errorMessage;
+  
+  // Firestore service
+  final GlossaryService _glossaryService = GlossaryService();
+  
   // Canvas/Drawing controllers
   final ScribbleNotifier _notifier = ScribbleNotifier();
   final GlobalKey _canvasKey = GlobalKey();
@@ -34,12 +43,68 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     // Use provided glossaryItem or create a new one if none provided
     if (widget.glossaryItem != null) {
       glossaryItem = widget.glossaryItem!;
+      // Load entries from Firestore
+      _loadEntries();
     } else {
       // Fallback: create a temporary glossary item (for backward compatibility)
       glossaryItem = GlossaryItem(
         id: 'temp',
         name: 'Glossary',
       );
+    }
+  }
+
+  /// Load entries from Firestore
+  Future<void> _loadEntries() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final entries = await _glossaryService.loadEntries(glossaryItem.id);
+      setState(() {
+        glossaryItem.entries = entries;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Failed to load entries: $e';
+        _isLoading = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_errorMessage!)),
+        );
+      }
+    }
+  }
+
+  /// Save entry to Firestore
+  Future<void> _saveEntryToFirestore(int index) async {
+    if (index < 0 || index >= glossaryItem.entries.length) return;
+
+    setState(() {
+      _isSaving = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final entry = glossaryItem.entries[index];
+      await _glossaryService.saveEntry(glossaryItem.id, entry, index);
+      setState(() {
+        _isSaving = false;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Failed to save entry: $e';
+        _isSaving = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_errorMessage!)),
+        );
+      }
     }
   }
 
@@ -67,7 +132,10 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
       setState(() {
         glossaryItem.entries[editingIndex!].symbolImage = imageData;
         showCanvas = false;
+        final index = editingIndex!;
         editingIndex = null;
+        // Save to Firestore
+        _saveEntryToFirestore(index);
       });
       _notifier.clear();
     }
@@ -121,6 +189,8 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                 onPressed: () {
                   setState(() {
                     entry.symbolImage = null; // Remove the image
+                    // Save to Firestore
+                    _saveEntryToFirestore(rowIndex);
                   });
                   Navigator.pop(context);
                 },
@@ -248,6 +318,8 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                       glossaryItem.entries[rowIndex].synonym = _editController.text;
                       break;
                   }
+                  // Save to Firestore
+                  _saveEntryToFirestore(rowIndex);
                 });
                 Navigator.pop(context);
               },
@@ -268,13 +340,16 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   /// Adds a new empty entry to the glossary
   void _addNewEntry() {
     setState(() {
-      glossaryItem.addEntry(GlossaryEntry(
+      final newEntry = GlossaryEntry(
         english: '',
         spanish: '',
         definition: '',
         synonym: '',
-      ));
-      print("ADDED NEW ENTRY:");
+      );
+      glossaryItem.addEntry(newEntry);
+      final index = glossaryItem.entries.length - 1;
+      // Save to Firestore
+      _saveEntryToFirestore(index);
     });
 
     // Scroll to the bottom of the list to show the newly added entry
@@ -298,9 +373,27 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
         title: Text(glossaryItem.name),
         backgroundColor: Colors.grey[800],
         iconTheme: IconThemeData(color: Colors.white),
+        actions: [
+          if (_isSaving)
+            Padding(
+              padding: EdgeInsets.all(16.0),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              ),
+            ),
+        ],
       ),
       // Toggle between canvas view for drawing and table view for entries
-      body: showCanvas ? _buildCanvasView() : _buildTableView(),
+      body: _isLoading
+          ? Center(child: CircularProgressIndicator())
+          : showCanvas
+              ? _buildCanvasView()
+              : _buildTableView(),
     );
   }
 
@@ -345,11 +438,35 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                     // Delete button for each row
                     IconButton(
                       icon: Icon(Icons.delete, color: Colors.red),
-                      onPressed: () {
-                        setState(() {
-                          print("DELETING ENTRY AT INDEX $index:");
-                          glossaryItem.deleteEntry(index);
-                        });
+                      onPressed: _isSaving ? null : () async {
+                        final entry = glossaryItem.entries[index];
+                        if (entry.id != null) {
+                          // Delete from Firestore
+                          setState(() {
+                            _isSaving = true;
+                          });
+                          try {
+                            await _glossaryService.deleteEntry(glossaryItem.id, entry.id!);
+                            setState(() {
+                              glossaryItem.deleteEntry(index);
+                              _isSaving = false;
+                            });
+                          } catch (e) {
+                            setState(() {
+                              _isSaving = false;
+                            });
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Failed to delete entry: $e')),
+                              );
+                            }
+                          }
+                        } else {
+                          // Just remove from local list if not saved yet
+                          setState(() {
+                            glossaryItem.deleteEntry(index);
+                          });
+                        }
                       },
                     ),
                   ],
@@ -363,10 +480,19 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
         Padding(
           padding: const EdgeInsets.all(16.0),
           child: FloatingActionButton(
-            onPressed: _addNewEntry,
+            onPressed: _isSaving ? null : _addNewEntry,
             backgroundColor: Colors.black,
             foregroundColor: Colors.white,
-            child: Icon(Icons.add),
+            child: _isSaving
+                ? SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : Icon(Icons.add),
             tooltip: 'Add new entry',
           ),
         ),

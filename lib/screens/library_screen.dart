@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/library_models.dart';
 import '../widgets/library_item_card.dart';
+import '../services/glossary_service.dart';
 import 'glossary_screen.dart';
 import 'dart:math';
 
@@ -19,6 +20,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   // Folder navigation stack to track current location
   final List<FolderItem> _folderStack = [];
+
+  // Firestore service
+  final GlossaryService _glossaryService = GlossaryService();
 
   // Get current folder (null if at root)
   FolderItem? get _currentFolder => _folderStack.isEmpty ? null : _folderStack.last;
@@ -162,11 +166,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 parentId: _currentFolder!.id,
               );
               
-              setState(() {
-                _currentFolder!.addChild(glossary);
-              });
-              
-              Navigator.pop(context);
+              // Save glossary to Firestore
+              try {
+                await _glossaryService.saveGlossary(glossary);
+                setState(() {
+                  _currentFolder!.addChild(glossary);
+                });
+                Navigator.pop(context);
+              } catch (e) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Failed to create glossary: $e')),
+                );
+              }
             },
             child: Text('Create'),
           ),
@@ -230,11 +242,23 @@ class _LibraryScreenState extends State<LibraryScreen> {
             child: Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               if (nameController.text.trim().isNotEmpty) {
                 setState(() {
                   item.name = nameController.text.trim();
                 });
+                
+                // If it's a glossary, save to Firestore
+                if (item is GlossaryItem) {
+                  try {
+                    await _glossaryService.saveGlossary(item);
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Failed to save glossary: $e')),
+                    );
+                  }
+                }
+                
                 Navigator.pop(context);
               }
             },
