@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../models/library_models.dart';
 import '../widgets/library_item_card.dart';
 import '../services/glossary_service.dart';
+import '../services/preferences_service.dart';
 import 'glossary_screen.dart';
 import 'dart:math';
 
@@ -24,6 +25,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   // Firestore service
   final GlossaryService _glossaryService = GlossaryService();
+  
+  // SharedPreferences service
+  final PreferencesService _preferencesService = PreferencesService();
   
   // Loading state
   bool _isLoading = false;
@@ -54,7 +58,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
-  /// Load library structure from Firestore
+  /// Load library structure from SharedPreferences and Firestore
   Future<void> _loadLibrary() async {
     if (!mounted) return;
     
@@ -63,12 +67,43 @@ class _LibraryScreenState extends State<LibraryScreen> {
     });
 
     try {
-      final rootFolders = await _glossaryService.loadRootFolders();
-      if (mounted) {
-        setState(() {
-          _rootFolders = rootFolders;
-          _isLoading = false;
-        });
+      // First, try to load from SharedPreferences for fast local access
+      try {
+        final cachedFolders = await _preferencesService.loadRootFolders();
+        if (cachedFolders.isNotEmpty && mounted) {
+          setState(() {
+            _rootFolders = cachedFolders;
+            _isLoading = false;
+          });
+          debugPrint('Loaded library from SharedPreferences');
+        }
+      } catch (e) {
+        debugPrint('Error loading from SharedPreferences: $e');
+      }
+
+      // Then sync with Firestore in the background
+      try {
+        final rootFolders = await _glossaryService.loadRootFolders();
+        if (mounted) {
+          setState(() {
+            _rootFolders = rootFolders;
+            _isLoading = false;
+          });
+          // Save to SharedPreferences for next time
+          await _preferencesService.saveRootFolders(rootFolders);
+          debugPrint('Synced library with Firestore and saved to SharedPreferences');
+        }
+      } catch (e) {
+        debugPrint('Error loading from Firestore: $e');
+        // If Firestore fails but we have cached data, that's okay
+        if (_rootFolders.isEmpty && mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to sync with server. Using cached data.')),
+          );
+        }
       }
     } catch (e) {
       debugPrint('Error loading library: $e');
@@ -83,14 +118,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
-  /// Save library structure to Firestore
+  /// Save library structure to Firestore and SharedPreferences
   Future<void> _saveLibrary() async {
     try {
-      // Save all root folders (which will recursively save their children)
+      // Save all root folders to Firestore (which will recursively save their children)
       for (var folder in _rootFolders) {
         await _saveFolderRecursive(folder);
       }
+      
+      // Also save to SharedPreferences for local caching
+      await _preferencesService.saveRootFolders(_rootFolders);
+      debugPrint('Saved library to Firestore and SharedPreferences');
     } catch (e) {
+      debugPrint('Error saving library: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to save library: $e')),
@@ -180,9 +220,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   }
                 });
                 
-                // Save folder to Firestore
+                // Save folder to Firestore and SharedPreferences
                 try {
                   await _glossaryService.saveFolder(folder);
+                  await _preferencesService.saveFolder(folder);
                   // Save entire library structure to ensure consistency
                   await _saveLibrary();
                 } catch (e) {
@@ -248,12 +289,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 parentId: _currentFolder!.id,
               );
               
-              // Save glossary to Firestore
+              // Save glossary to Firestore and SharedPreferences
               try {
                 await _glossaryService.saveGlossary(glossary);
+                await _preferencesService.saveGlossary(glossary);
                 setState(() {
                   _currentFolder!.addChild(glossary);
                 });
+                // Save parent folder to update its children list
+                await _preferencesService.saveFolder(_currentFolder!);
                 Navigator.pop(context);
                 // Show success message
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -334,12 +378,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   item.name = nameController.text.trim();
                 });
                 
-                // Save to Firestore
+                // Save to Firestore and SharedPreferences
                 try {
                   if (item is GlossaryItem) {
                     await _glossaryService.saveGlossary(item);
+                    await _preferencesService.saveGlossary(item);
                   } else if (item is FolderItem) {
                     await _glossaryService.saveFolder(item);
+                    await _preferencesService.saveFolder(item);
                     // Save entire library to ensure consistency
                     await _saveLibrary();
                   }
