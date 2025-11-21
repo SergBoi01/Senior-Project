@@ -2,7 +2,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
-import 'dart:typed_data';
 import '../models/library_models.dart';
 
 /// Service class for managing glossary data in Firestore
@@ -73,15 +72,25 @@ class GlossaryService {
     if (_userId == null) throw Exception('User not logged in');
     
     try {
-      final querySnapshot = await _firestore
-          .collection(_getEntriesPath(glossaryId))
-          .orderBy('updatedAt', descending: true)
-          .get();
+      QuerySnapshot querySnapshot;
+      try {
+        // Try to order by updatedAt first
+        querySnapshot = await _firestore
+            .collection(_getEntriesPath(glossaryId))
+            .orderBy('updatedAt', descending: true)
+            .get();
+      } catch (e) {
+        // If ordering fails (e.g., no index or no updatedAt field), just get all entries
+        querySnapshot = await _firestore
+            .collection(_getEntriesPath(glossaryId))
+            .get();
+      }
 
       List<GlossaryEntry> entries = [];
       
       for (var doc in querySnapshot.docs) {
-        final data = doc.data();
+        final data = doc.data() as Map<String, dynamic>?;
+        if (data == null) continue;
         
         // Download symbol image if URL exists
         Uint8List? symbolImage;
@@ -178,7 +187,8 @@ class GlossaryService {
   }
 
   /// Load a glossary from Firestore
-  Future<GlossaryItem?> loadGlossary(String glossaryId) async {
+  /// [loadEntries] - if true, loads all entries (default: false for performance)
+  Future<GlossaryItem?> loadGlossary(String glossaryId, {bool loadEntries = false}) async {
     if (_userId == null) throw Exception('User not logged in');
     
     try {
@@ -191,17 +201,183 @@ class GlossaryService {
 
       final data = doc.data()!;
       
-      // Load entries
-      final entries = await loadEntries(glossaryId);
+      // Only load entries if requested (for performance when loading library structure)
+      List<GlossaryEntry> glossaryEntries = [];
+      if (loadEntries) {
+        glossaryEntries = await this.loadEntries(glossaryId);
+      }
 
       return GlossaryItem(
         id: glossaryId,
         name: data['name'] ?? '',
         parentId: data['parentId'],
-        entries: entries,
+        entries: glossaryEntries,
       );
     } catch (e) {
       throw Exception('Failed to load glossary: $e');
+    }
+  }
+
+  /// Save a folder to Firestore
+  Future<void> saveFolder(FolderItem folder) async {
+    if (_userId == null) throw Exception('User not logged in');
+    
+    try {
+      await _firestore
+          .collection('users/$_userId/folders')
+          .doc(folder.id)
+          .set({
+        'name': folder.name,
+        'parentId': folder.parentId,
+        'isChecked': folder.isChecked,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      throw Exception('Failed to save folder: $e');
+    }
+  }
+
+  /// Load a folder from Firestore
+  Future<FolderItem?> loadFolder(String folderId) async {
+    if (_userId == null) throw Exception('User not logged in');
+    
+    try {
+      final doc = await _firestore
+          .collection('users/$_userId/folders')
+          .doc(folderId)
+          .get();
+
+      if (!doc.exists) return null;
+
+      final data = doc.data()!;
+      
+      // Load children (folders and glossaries)
+      List<dynamic> children = [];
+      
+      // Load subfolders
+      final subfoldersSnapshot = await _firestore
+          .collection('users/$_userId/folders')
+          .where('parentId', isEqualTo: folderId)
+          .get();
+      
+      for (var subfolderDoc in subfoldersSnapshot.docs) {
+        try {
+          final subfolder = await loadFolder(subfolderDoc.id);
+          if (subfolder != null) {
+            children.add(subfolder);
+          }
+        } catch (e) {
+          debugPrint('Error loading subfolder ${subfolderDoc.id}: $e');
+          // Continue loading other folders even if one fails
+        }
+      }
+      
+      // Load glossaries in this folder (without entries for performance)
+      final glossariesSnapshot = await _firestore
+          .collection('users/$_userId/glossaries')
+          .where('parentId', isEqualTo: folderId)
+          .get();
+      
+      for (var glossaryDoc in glossariesSnapshot.docs) {
+        try {
+          // Load glossary without entries for better performance
+          final glossary = await loadGlossary(glossaryDoc.id, loadEntries: false);
+          if (glossary != null) {
+            children.add(glossary);
+          }
+        } catch (e) {
+          debugPrint('Error loading glossary ${glossaryDoc.id}: $e');
+          // Continue loading other glossaries even if one fails
+        }
+      }
+
+      return FolderItem(
+        id: folderId,
+        name: data['name'] ?? '',
+        isChecked: data['isChecked'] ?? false,
+        parentId: data['parentId'],
+        children: children,
+      );
+    } catch (e) {
+      throw Exception('Failed to load folder: $e');
+    }
+  }
+
+  /// Load all root folders (folders with no parent)
+  Future<List<FolderItem>> loadRootFolders() async {
+    if (_userId == null) throw Exception('User not logged in');
+    
+    try {
+      final querySnapshot = await _firestore
+          .collection('users/$_userId/folders')
+          .where('parentId', isNull: true)
+          .get();
+
+      List<FolderItem> rootFolders = [];
+      
+      for (var doc in querySnapshot.docs) {
+        final folder = await loadFolder(doc.id);
+        if (folder != null) {
+          rootFolders.add(folder);
+        }
+      }
+
+      return rootFolders;
+    } catch (e) {
+      throw Exception('Failed to load root folders: $e');
+    }
+  }
+
+  /// Delete a folder from Firestore
+  Future<void> deleteFolder(String folderId) async {
+    if (_userId == null) throw Exception('User not logged in');
+    
+    try {
+      // Load folder to get children
+      final folder = await loadFolder(folderId);
+      if (folder != null) {
+        // Recursively delete all children
+        for (var child in folder.children) {
+          if (child is FolderItem) {
+            await deleteFolder(child.id);
+          } else if (child is GlossaryItem) {
+            // Delete glossary and its entries
+            await _deleteGlossary(child.id);
+          }
+        }
+      }
+      
+      // Delete the folder itself
+      await _firestore
+          .collection('users/$_userId/folders')
+          .doc(folderId)
+          .delete();
+    } catch (e) {
+      throw Exception('Failed to delete folder: $e');
+    }
+  }
+
+  /// Delete a glossary and all its entries
+  Future<void> _deleteGlossary(String glossaryId) async {
+    if (_userId == null) throw Exception('User not logged in');
+    
+    try {
+      // Delete all entries
+      final entriesSnapshot = await _firestore
+          .collection('users/$_userId/glossaries/$glossaryId/entries')
+          .get();
+      
+      for (var entryDoc in entriesSnapshot.docs) {
+        await deleteEntry(glossaryId, entryDoc.id);
+      }
+      
+      // Delete glossary document
+      await _firestore
+          .collection('users/$_userId/glossaries')
+          .doc(glossaryId)
+          .delete();
+    } catch (e) {
+      throw Exception('Failed to delete glossary: $e');
     }
   }
 }
