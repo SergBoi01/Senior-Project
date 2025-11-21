@@ -2,7 +2,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
+
 import '../models/library_models.dart';
+import '../models/strokes_models.dart';
+
 
 /// Service class for managing glossary data in Firestore
 class GlossaryService {
@@ -47,6 +50,12 @@ class GlossaryService {
         await _deleteSymbolImage(glossaryId, entryId);
       }
 
+      // Serialize strokes to JSON
+      List<Map<String, dynamic>>? strokesJson;
+      if (entry.strokes != null && entry.strokes!.isNotEmpty) {
+        strokesJson = entry.strokes!.map((stroke) => stroke.toJson()).toList();
+      }
+
       // Save entry data to Firestore
       await _firestore
           .collection(_getEntriesPath(glossaryId))
@@ -57,6 +66,7 @@ class GlossaryService {
         'definition': entry.definition,
         'synonym': entry.synonym,
         'symbolImageUrl': symbolImageUrl,
+        'strokes': strokesJson, // Save strokes data
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
@@ -102,6 +112,18 @@ class GlossaryService {
           }
         }
 
+        // Deserialize strokes from JSON
+        List<Stroke>? strokes;
+        if (data['strokes'] != null && data['strokes'] is List) {
+          try {
+            strokes = (data['strokes'] as List)
+                .map((strokeJson) => Stroke.fromJson(strokeJson as Map<String, dynamic>))
+                .toList();
+          } catch (e) {
+            debugPrint('Failed to deserialize strokes: $e');
+          }
+        }
+
         entries.add(GlossaryEntry(
           id: doc.id,
           english: data['english'] ?? '',
@@ -109,6 +131,7 @@ class GlossaryService {
           definition: data['definition'] ?? '',
           synonym: data['synonym'] ?? '',
           symbolImage: symbolImage,
+          strokes: strokes,
         ));
       }
 
@@ -179,6 +202,7 @@ class GlossaryService {
           .set({
         'name': glossary.name,
         'parentId': glossary.parentId,
+        'isChecked': glossary.isChecked,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     } catch (e) {
@@ -210,6 +234,7 @@ class GlossaryService {
       return GlossaryItem(
         id: glossaryId,
         name: data['name'] ?? '',
+        isChecked: data['isChecked'] ?? false,
         parentId: data['parentId'],
         entries: glossaryEntries,
       );
@@ -380,5 +405,5 @@ class GlossaryService {
       throw Exception('Failed to delete glossary: $e');
     }
   }
-}
 
+}

@@ -3,7 +3,9 @@ import 'package:flutter/rendering.dart';
 import 'package:scribble/scribble.dart';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+
 import '../models/library_models.dart';
+import '../models/strokes_models.dart';
 import '../services/glossary_service.dart';
 
 class GlossaryScreen extends StatefulWidget {
@@ -36,6 +38,11 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   
   // Text input controller for editing cells
   final TextEditingController _editController = TextEditingController();
+
+  // NEW: Stroke tracking for symbol detection
+  List<Stroke> _currentStrokes = [];
+  List<Offset> _currentStrokePoints = [];
+  DateTime? _currentStrokeStartTime;
 
   @override
   void initState() {
@@ -125,19 +132,31 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   }
 
   /// Saves the drawn symbol to the current glossary entry
+  /// UPDATED: Now saves both image and strokes
   void _saveSymbol() async {
     Uint8List? imageData = await _captureCanvas();
     
     if (editingIndex != null && imageData != null) {
       setState(() {
+        // Save both image and strokes
         glossaryItem.entries[editingIndex!].symbolImage = imageData;
+        glossaryItem.entries[editingIndex!].strokes = List.from(_currentStrokes);
+        
         showCanvas = false;
         final index = editingIndex!;
         editingIndex = null;
+        
         // Save to Firestore
         _saveEntryToFirestore(index);
       });
+      
+      // Clear everything
       _notifier.clear();
+      _currentStrokes.clear();
+      _currentStrokePoints.clear();
+      _currentStrokeStartTime = null;
+      
+      print('Saved symbol with ${_currentStrokes.length} strokes');
     }
   }
 
@@ -166,6 +185,13 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                   fit: BoxFit.contain,
                 ),
                 SizedBox(height: 16),
+                // Show stroke count if available
+                if (entry.strokes != null && entry.strokes!.isNotEmpty)
+                  Text(
+                    '${entry.strokes!.length} stroke(s)',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                SizedBox(height: 8),
                 Text(
                   'What would you like to do?',
                   style: TextStyle(fontSize: 18),
@@ -188,7 +214,8 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
               TextButton(
                 onPressed: () {
                   setState(() {
-                    entry.symbolImage = null; // Remove the image
+                    entry.symbolImage = null;
+                    entry.strokes = null; // Also clear strokes
                     // Save to Firestore
                     _saveEntryToFirestore(rowIndex);
                   });
@@ -565,6 +592,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   }
 
   /// Builds the canvas view for drawing symbols
+  /// UPDATED: Now captures strokes with GestureDetector
   Widget _buildCanvasView() {
     return Column(
       children: [
@@ -578,21 +606,41 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
               Spacer(),
+              // Show stroke count
+              Text(
+                '${_currentStrokes.length} stroke(s)',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              SizedBox(width: 16),
               // Undo button
               IconButton(
                 icon: Icon(Icons.undo),
-                onPressed: () => _notifier.undo(),
+                onPressed: () {
+                  _notifier.undo();
+                  // Also remove last stroke from tracking
+                  if (_currentStrokes.isNotEmpty) {
+                    setState(() {
+                      _currentStrokes.removeLast();
+                    });
+                  }
+                },
               ),
               // Clear canvas button
               IconButton(
                 icon: Icon(Icons.clear),
-                onPressed: () => _notifier.clear(),
+                onPressed: () {
+                  _notifier.clear();
+                  setState(() {
+                    _currentStrokes.clear();
+                    _currentStrokePoints.clear();
+                  });
+                },
               ),
             ],
           ),
         ),
         
-        // Drawing canvas
+        // Drawing canvas with gesture detection
         Expanded(
           child: Container(
             margin: EdgeInsets.all(16),
@@ -600,10 +648,41 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
               border: Border.all(color: Colors.grey),
               color: Colors.white,
             ),
-            child: RepaintBoundary(
-              key: _canvasKey,
-              child: Scribble(
-                notifier: _notifier,
+            child: GestureDetector(
+              onPanStart: (details) {
+                setState(() {
+                  _currentStrokePoints = [details.localPosition];
+                  _currentStrokeStartTime = DateTime.now();
+                });
+                print('Stroke started at ${details.localPosition}');
+              },
+              onPanUpdate: (details) {
+                setState(() {
+                  _currentStrokePoints.add(details.localPosition);
+                });
+              },
+              onPanEnd: (details) {
+                if (_currentStrokePoints.isNotEmpty && _currentStrokeStartTime != null) {
+                  final stroke = Stroke(
+                    points: List.from(_currentStrokePoints),
+                    startTime: _currentStrokeStartTime!,
+                    endTime: DateTime.now(),
+                  );
+                  
+                  setState(() {
+                    _currentStrokes.add(stroke);
+                    _currentStrokePoints = [];
+                    _currentStrokeStartTime = null;
+                  });
+                  
+                  print('Stroke ended: ${stroke.points.length} points, total strokes: ${_currentStrokes.length}');
+                }
+              },
+              child: RepaintBoundary(
+                key: _canvasKey,
+                child: Scribble(
+                  notifier: _notifier,
+                ),
               ),
             ),
           ),
@@ -621,6 +700,8 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                   setState(() {
                     showCanvas = false;
                     editingIndex = null;
+                    _currentStrokes.clear();
+                    _currentStrokePoints.clear();
                   });
                   _notifier.clear();
                 },
@@ -629,7 +710,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
               ),
               // Save symbol button
               ElevatedButton(
-                onPressed: _saveSymbol,
+                onPressed: _currentStrokes.isNotEmpty ? _saveSymbol : null,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.white,
                   foregroundColor: Colors.black,
@@ -648,6 +729,9 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     // Clean up controllers
     _scrollController.dispose();
     _editController.dispose();
+    // Clear stroke tracking
+    _currentStrokes.clear();
+    _currentStrokePoints.clear();
     super.dispose();
   }
 }

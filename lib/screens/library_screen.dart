@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
+import 'dart:math';
+
 import '../models/library_models.dart';
 import '../widgets/library_item_card.dart';
 import '../services/glossary_service.dart';
 import '../services/preferences_service.dart';
 import 'glossary_screen.dart';
-import 'dart:math';
 
 class LibraryScreen extends StatefulWidget {
   final FolderItem? initialFolder; // For navigating into a specific folder

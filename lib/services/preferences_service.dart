@@ -7,6 +7,31 @@ class PreferencesService {
   static const String _keyRootFolders = 'root_folders';
   static const String _keyLastSyncTime = 'last_sync_time';
 
+  Future<List<dynamic>> loadUserCorrections(String userId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('user_corrections_$userId');
+    if (saved != null) {
+      return List<dynamic>.from(jsonDecode(saved));
+    }
+    return [];
+  }
+
+  Future<void> saveUserCorrections(String userId, List<dynamic> corrections) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('user_corrections_$userId', jsonEncode(corrections));
+  }
+
+  Future<Map<String, dynamic>?> loadDetectionSettings(String userId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('detection_settings_$userId');
+    return saved != null ? jsonDecode(saved) : null;
+  }
+
+  Future<void> saveDetectionSettings(String userId, Map<String, dynamic> json) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('detection_settings_$userId', jsonEncode(json));
+  }
+
   /// Get SharedPreferences instance
   Future<SharedPreferences> get _prefs async {
     return await SharedPreferences.getInstance();

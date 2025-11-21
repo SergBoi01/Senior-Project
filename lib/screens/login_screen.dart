@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:senior_project/screens/main_page.dart';
-import 'package:senior_project/screens/registration_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+
+import 'package:senior_project/screens/main_screen.dart';
+import 'package:senior_project/screens/registration_screen.dart';
+import 'package:senior_project/models/user_data_manager_models.dart';
+
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -11,38 +14,46 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController emailController = TextEditingController();
-  final TextEditingController passwordController = TextEditingController();
+  final emailController = TextEditingController();
+  final passwordController = TextEditingController();
   String errorMessage = '';
   bool _isPasswordVisible = false;
 
-  void login() async {
-  String email = emailController.text.trim();
-  String password = passwordController.text;
-
-  if (email.isEmpty || password.isEmpty) {
-    setState(() {
-      errorMessage = 'Please enter both email and password';
-    });
-    return;
-  }
-
-  try {
-    await FirebaseAuth.instance.signInWithEmailAndPassword(
-      email: email,
-      password: password,
-    );
-    
+  void onLoginSuccess(String userId) async {
+    await UserDataManager().loadUserData(userId);
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (context) => const MainPage()),
+      MaterialPageRoute(
+          builder: (_) => MainPage()), // main app screen
     );
-  } catch (e) {
-    setState(() {
-      errorMessage = 'Invalid email or password';
-    });
   }
-}
+  
+  void login() async {
+    String email = emailController.text.trim();
+    String password = passwordController.text;
+
+    if (email.isEmpty || password.isEmpty) {
+      setState(() => errorMessage = 'Enter email & password');
+      return;
+    }
+
+    try {
+      UserCredential cred = await FirebaseAuth.instance
+          .signInWithEmailAndPassword(email: email, password: password);
+      onLoginSuccess(cred.user!.uid);
+    } catch (e) {
+      setState(() => errorMessage = 'Invalid email or password');
+    }
+  }
+
+
+  void bypassLogin() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => MainPage()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -56,30 +67,30 @@ class _LoginScreenState extends State<LoginScreen> {
           children: [
             TextField(
               controller: emailController,
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 labelText: 'Email',
                 border: OutlineInputBorder(),
               ),
             ),
             SizedBox(height: 20),
             TextField(
-  controller: passwordController,
-  decoration: InputDecoration(
-    labelText: 'Password',
-    border: OutlineInputBorder(),
-    suffixIcon: IconButton(
-      icon: Icon(
-        _isPasswordVisible ? Icons.visibility : Icons.visibility_off,
-      ),
-      onPressed: () {
-        setState(() {
-          _isPasswordVisible = !_isPasswordVisible;
-        });
-      },
-    ),
-  ),
-  obscureText: !_isPasswordVisible,
-),
+              controller: passwordController,
+              decoration: InputDecoration(
+                labelText: 'Password',
+                border: OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _isPasswordVisible ? Icons.visibility : Icons.visibility_off,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _isPasswordVisible = !_isPasswordVisible;
+                    });
+                  },
+                ),
+              ),
+              obscureText: !_isPasswordVisible,
+            ),
             SizedBox(height: 10),
             if (errorMessage.isNotEmpty)
               Text(
@@ -92,28 +103,22 @@ class _LoginScreenState extends State<LoginScreen> {
               child: const Text('Login'),
             ),
             SizedBox(height: 10),
-TextButton(
-  onPressed: () {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => RegistrationScreen()),
-    );
-  },
-  child: Text('Don\'t have an account? Create one'),
-),
-            SizedBox(height: 20),
-            // Temporary bypass button for testing
             TextButton(
               onPressed: () {
-                Navigator.pushReplacement(
+                Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const MainPage()),
+                  MaterialPageRoute(builder: (context) => RegistrationScreen()),
                 );
               },
-              style: TextButton.styleFrom(
-                foregroundColor: Colors.grey,
+              child: Text('Don\'t have an account? Create one'),
+            ),
+            SizedBox(height: 10),
+            ElevatedButton(
+              onPressed: bypassLogin,
+              child: const Text('Bypass Login (Dev)'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.grey,
               ),
-              child: Text('Skip Login (Temporary)'),
             ),
           ],
         ),

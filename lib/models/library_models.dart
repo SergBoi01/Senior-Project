@@ -1,13 +1,15 @@
 import 'dart:typed_data';
+import 'strokes_models.dart';
 
-/// Represents a glossary entry with text fields and optional symbol image
+/// Represents a glossary entry with text fields and optional symbol image + strokes
 class GlossaryEntry {
   String? id; // Firestore document ID (null for new entries)
   String english;
   String spanish;
   String definition;
   String synonym;  
-  Uint8List? symbolImage; // for drawn symbols
+  Uint8List? symbolImage; // for displaying symbols
+  List<Stroke>? strokes; // for symbol comparison/detection
 
   // Main constructor
   GlossaryEntry({
@@ -17,6 +19,7 @@ class GlossaryEntry {
     required this.definition,
     required this.synonym,
     this.symbolImage,
+    this.strokes,
   });
 
   // Short constructor for word initialization
@@ -25,7 +28,8 @@ class GlossaryEntry {
         spanish = "",
         definition = "",
         synonym = "",
-        symbolImage = null;
+        symbolImage = null,
+        strokes = null;
 }
 
 /// Represents a folder in the library system
@@ -98,3 +102,72 @@ class GlossaryItem {
   }
 }
 
+
+extension FolderItemFirestore on FolderItem {
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'isChecked': isChecked,
+      'parentId': parentId,
+      'children': children.map((c) {
+        if (c is FolderItem) return c.toJson();
+        if (c is GlossaryItem) return c.toJson();
+        return {};
+      }).toList(),
+    };
+  }
+
+  static FolderItem fromJson(Map<String, dynamic> json) {
+    return FolderItem(
+      id: json['id'],
+      name: json['name'],
+      isChecked: json['isChecked'] ?? false,
+      parentId: json['parentId'],
+      children: (json['children'] as List<dynamic>?)
+              ?.map((c) {
+                if (c.containsKey('entries')) {
+                  return GlossaryItemFirestore.fromJson(c);
+                }
+                return FolderItemFirestore.fromJson(c);
+              })
+              .toList() ??
+          [],
+    );
+  }
+}
+
+extension GlossaryItemFirestore on GlossaryItem {
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'isChecked': isChecked,
+      'parentId': parentId,
+      'entries': entries.map((e) => {
+            'english': e.english,
+            'spanish': e.spanish,
+            'definition': e.definition,
+            'synonym': e.synonym,
+          }).toList(),
+    };
+  }
+
+  static GlossaryItem fromJson(Map<String, dynamic> json) {
+    return GlossaryItem(
+      id: json['id'],
+      name: json['name'],
+      isChecked: json['isChecked'] ?? false,
+      parentId: json['parentId'],
+      entries: (json['entries'] as List<dynamic>?)
+              ?.map((e) => GlossaryEntry(
+                    english: e['english'],
+                    spanish: e['spanish'],
+                    definition: e['definition'],
+                    synonym: e['synonym'],
+                  ))
+              .toList() ??
+          [],
+    );
+  }
+}
