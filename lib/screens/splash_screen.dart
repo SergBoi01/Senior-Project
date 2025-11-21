@@ -31,7 +31,7 @@ class _SplashScreenState extends State<SplashScreen> {
             glossary: widget.glossary,
             userCorrections: widget.userCorrections,
           ),
-          transitionDuration: const Duration(milliseconds: 700),
+          transitionDuration: const Duration(milliseconds: 5000),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             return FadeTransition(
               opacity: animation,

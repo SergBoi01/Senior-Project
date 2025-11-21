@@ -353,7 +353,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     print('String length: ${bestMatch.length}');
     print('Bytes: ${bestMatch.codeUnits}');
 
-    return bestScore > 0.4 ? bestMatch : "??";
+    return bestScore > 0.6 ? bestMatch : "??";
   }
 
   // ==================== NORMALIZATION ====================
