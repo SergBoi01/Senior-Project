@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:scribble/scribble.dart';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import '../screens/main_screen.dart';
 import '../models/library_models.dart';
 import '../models/strokes_models.dart';
 import '../services/glossary_service.dart';
@@ -32,7 +32,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   final GlossaryService _glossaryService = GlossaryService();
   
   // Canvas/Drawing controllers
-  final ScribbleNotifier _notifier = ScribbleNotifier();
   final GlobalKey _canvasKey = GlobalKey();
   final ScrollController _scrollController = ScrollController();
   
@@ -151,7 +150,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
       });
       
       // Clear everything
-      _notifier.clear();
       _currentStrokes.clear();
       _currentStrokePoints.clear();
       _currentStrokeStartTime = null;
@@ -596,7 +594,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   Widget _buildCanvasView() {
     return Column(
       children: [
-        // Canvas toolbar
+        // Toolbar
         Padding(
           padding: const EdgeInsets.all(8.0),
           child: Row(
@@ -606,30 +604,25 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
               Spacer(),
-              // Show stroke count
+
               Text(
                 '${_currentStrokes.length} stroke(s)',
                 style: TextStyle(fontSize: 12, color: Colors.grey),
               ),
               SizedBox(width: 16),
-              // Undo button
+
               IconButton(
                 icon: Icon(Icons.undo),
                 onPressed: () {
-                  _notifier.undo();
-                  // Also remove last stroke from tracking
                   if (_currentStrokes.isNotEmpty) {
-                    setState(() {
-                      _currentStrokes.removeLast();
-                    });
+                    setState(() => _currentStrokes.removeLast());
                   }
                 },
               ),
-              // Clear canvas button
+
               IconButton(
                 icon: Icon(Icons.clear),
                 onPressed: () {
-                  _notifier.clear();
                   setState(() {
                     _currentStrokes.clear();
                     _currentStrokePoints.clear();
@@ -639,11 +632,11 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
             ],
           ),
         ),
-        
-        // Drawing canvas with gesture detection
+
+        // CANVAS — identical behavior to main_screen.dart
         Expanded(
           child: Container(
-            margin: EdgeInsets.all(16),
+            margin: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               border: Border.all(color: Colors.grey),
               color: Colors.white,
@@ -654,7 +647,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                   _currentStrokePoints = [details.localPosition];
                   _currentStrokeStartTime = DateTime.now();
                 });
-                print('Stroke started at ${details.localPosition}');
               },
               onPanUpdate: (details) {
                 setState(() {
@@ -662,39 +654,39 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                 });
               },
               onPanEnd: (details) {
-                if (_currentStrokePoints.isNotEmpty && _currentStrokeStartTime != null) {
-                  final stroke = Stroke(
-                    points: List.from(_currentStrokePoints),
-                    startTime: _currentStrokeStartTime!,
-                    endTime: DateTime.now(),
-                  );
-                  
+                if (_currentStrokePoints.isNotEmpty &&
+                    _currentStrokeStartTime != null) {
                   setState(() {
-                    _currentStrokes.add(stroke);
+                    _currentStrokes.add(
+                      Stroke(
+                        points: List.from(_currentStrokePoints),
+                        startTime: _currentStrokeStartTime!,
+                        endTime: DateTime.now(),
+                      ),
+                    );
                     _currentStrokePoints = [];
                     _currentStrokeStartTime = null;
                   });
-                  
-                  print('Stroke ended: ${stroke.points.length} points, total strokes: ${_currentStrokes.length}');
                 }
               },
-              child: RepaintBoundary(
-                key: _canvasKey,
-                child: Scribble(
-                  notifier: _notifier,
+              child: SizedBox.expand(
+                child: CustomPaint(
+                  painter: CanvasPainter(
+                    strokes: _currentStrokes,
+                    currentStroke: _currentStrokePoints,
+                  ),
                 ),
               ),
             ),
           ),
         ),
-        
-        // Action buttons
+
+        // Buttons
         Padding(
           padding: const EdgeInsets.all(16.0),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              // Cancel button
               TextButton(
                 onPressed: () {
                   setState(() {
@@ -703,12 +695,10 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                     _currentStrokes.clear();
                     _currentStrokePoints.clear();
                   });
-                  _notifier.clear();
                 },
-                style: TextButton.styleFrom(foregroundColor: Colors.black),
                 child: Text('Cancel'),
               ),
-              // Save symbol button
+
               ElevatedButton(
                 onPressed: _currentStrokes.isNotEmpty ? _saveSymbol : null,
                 style: ElevatedButton.styleFrom(
@@ -723,6 +713,8 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
       ],
     );
   }
+
+
 
   @override
   void dispose() {

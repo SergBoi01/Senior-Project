@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 
 import 'package:senior_project/models/strokes_models.dart';
+import 'package:senior_project/models/library_models.dart';
 import 'package:senior_project/models/detection_settings_models.dart';
 import 'package:senior_project/models/user_data_manager_models.dart';
 
+import 'package:senior_project/services/drawing_settings.dart';
 
 class SettingsScreen extends StatefulWidget {
-  final String userId;
+  final String? userID;
 
-  const SettingsScreen({super.key, required this.userId});
+  const SettingsScreen({super.key, this.userID});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -19,6 +21,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   DetectionSettings detectionSettings = DetectionSettings();
   bool isLoading = true;
 
+
   @override
   void initState() {
     super.initState();
@@ -26,9 +29,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadSettings() async {
+    if (widget.userID == null) {
+      setState(() => isLoading = false);
+      return;
+    }
+
     setState(() => isLoading = true);
 
-    await UserDataManager().loadUserData(widget.userId);
+    await UserDataManager().loadUserData(widget.userID!);
 
     setState(() {
       userCorrections = UserDataManager().corrections;
@@ -38,8 +46,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _saveCorrections() async {
+    if (widget.userID == null) return;
+    
     UserDataManager().corrections = userCorrections;
-    await UserDataManager().saveUserData(widget.userId);
+    await UserDataManager().saveUserData(widget.userID!);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Corrections saved')),
@@ -48,8 +58,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _saveDetectionSettings() async {
+    if (widget.userID == null) return;
+    
     UserDataManager().detectionSettings = detectionSettings;
-    await UserDataManager().saveUserData(widget.userId);
+    await UserDataManager().saveUserData(widget.userID!);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Detection settings saved')),
@@ -69,51 +81,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _editCorrection(int index) async {
-
-    // FOR EDITING CORRECTIONS IN SETTINGS: WE HAVE TO OPEN A MINI-LIBRARY POP-UP, AND LET
-    // THE USER DIRECT THEMSELVES TOWADS THE CORRECT CORRECTION
-    final glossary = Glossary();
-    await glossary.loadFromFirestore(widget.userId);
+    if (widget.userID == null) return;
+    
+    // Load library structure to get all checked glossaries
+    final libraryStructure = await UserDataManager().loadLibraryStructure(widget.userID!);
+    
+    // Collect all entries from checked glossaries
+    List<Map<String, dynamic>> allEntries = [];
+    
+    void collectEntries(dynamic item, String glossaryName) {
+      if (item is FolderItem) {
+        if (!item.isChecked) return; // Skip unchecked folders
+        
+        for (var child in item.children) {
+          collectEntries(child, glossaryName);
+        }
+      } else if (item is GlossaryItem) {
+        if (!item.isChecked) return; // Skip unchecked glossaries
+        
+        for (var entry in item.entries) {
+          allEntries.add({
+            'entry': entry,
+            'glossaryName': item.name,
+          });
+        }
+      }
+    }
+    
+    // Collect from all root folders
+    for (var rootFolder in libraryStructure) {
+      collectEntries(rootFolder, '');
+    }
 
     if (!mounted) return;
 
+    // Show search dialog
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Edit Correction'),
-        content: SizedBox(
-          height: 300,
-          width: 300,
-          child: ListView.builder(
-            itemCount: glossary.entries.length,
-            itemBuilder: (context, i) {
-              final entry = glossary.entries[i];
-              return ListTile(
-                title: Text('${entry.english} → ${entry.spanish}'),
-                onTap: () async {
-                  setState(() {
-                    userCorrections[index] = UserCorrection(
-                      drawnStrokes: userCorrections[index].drawnStrokes,
-                      correctedLabel: entry.spanish,
-                      timestamp: DateTime.now(),
-                    );
-                  });
-                  await _saveCorrections();
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Correction updated')),
-                  );
-                },
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-        ],
+      builder: (context) => _SearchCorrectionDialog(
+        allEntries: allEntries,
+        onEntrySelected: (entry, glossaryName) async {
+          setState(() {
+            userCorrections[index] = UserCorrection(
+              drawnStrokes: userCorrections[index].drawnStrokes,
+              correctedLabel: entry.spanish,
+              timestamp: DateTime.now(),
+            );
+          });
+          await _saveCorrections();
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Correction updated')),
+          );
+        },
       ),
     );
   }
@@ -364,6 +384,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
 
+                  // Pen Width Setting
+                  Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Expanded(
+                                  child: Text(
+                                    'Pen Size',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              // VV change to the pen width variable
+                              '${drawingSettings.penWidth} px',
+                              style: TextStyle(
+                                fontSize: 18,
+                                color: Colors.blue[700],
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Slider(
+                              value: drawingSettings.penWidth,
+                              min: 1,
+                              max: 30,
+                              divisions: 29,
+                              label: "${drawingSettings.penWidth.toInt()}",
+                              onChanged: (value) {
+                                setState(() {
+                                  drawingSettings.setPenWidth(value);
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
                   const Divider(thickness: 2, height: 32),
 
                   // User Corrections Header
@@ -506,6 +576,214 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
               ),
             ),
+    );
+  }
+  
+}
+
+// NEW: Search Dialog Widget
+class _SearchCorrectionDialog extends StatefulWidget {
+  final List<Map<String, dynamic>> allEntries;
+  final Function(GlossaryEntry entry, String glossaryName) onEntrySelected;
+
+  const _SearchCorrectionDialog({
+    required this.allEntries,
+    required this.onEntrySelected,
+  });
+
+  @override
+  State<_SearchCorrectionDialog> createState() => _SearchCorrectionDialogState();
+}
+
+class _SearchCorrectionDialogState extends State<_SearchCorrectionDialog> {
+  final TextEditingController _searchController = TextEditingController();
+  bool searchInSpanish = true; // true = Spanish, false = English
+  List<Map<String, dynamic>> _filteredEntries = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _filteredEntries = widget.allEntries;
+    _searchController.addListener(_filterEntries);
+  }
+
+  void _filterEntries() {
+    final query = _searchController.text.toLowerCase().trim();
+    
+    if (query.isEmpty) {
+      setState(() {
+        _filteredEntries = widget.allEntries;
+      });
+      return;
+    }
+
+    setState(() {
+      _filteredEntries = widget.allEntries.where((item) {
+        final entry = item['entry'] as GlossaryEntry;
+        final searchField = searchInSpanish ? entry.spanish : entry.english;
+        return searchField.toLowerCase().contains(query);
+      }).toList();
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Row(
+        children: [
+          const Expanded(
+            child: Text('Search Entry'),
+          ),
+          // Language toggle
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'EN',
+                style: TextStyle(
+                  color: searchInSpanish ? Colors.grey : Colors.black,
+                  fontWeight: searchInSpanish ? FontWeight.normal : FontWeight.bold,
+                  fontSize: 12,
+                ),
+              ),
+              Switch(
+                value: searchInSpanish,
+                onChanged: (value) {
+                  setState(() {
+                    searchInSpanish = value;
+                    _filterEntries(); // Re-filter with new language
+                  });
+                },
+                activeThumbColor: Colors.blue,
+                inactiveThumbColor: Colors.blue,
+              ),
+              Text(
+                'ES',
+                style: TextStyle(
+                  color: searchInSpanish ? Colors.black : Colors.grey,
+                  fontWeight: searchInSpanish ? FontWeight.bold : FontWeight.normal,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 400,
+        height: 500,
+        child: Column(
+          children: [
+            // Search TextField
+            TextField(
+              controller: _searchController,
+              autofocus: true,
+              decoration: InputDecoration(
+                hintText: 'Search in ${searchInSpanish ? "Spanish" : "English"}...',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          _searchController.clear();
+                        },
+                      )
+                    : null,
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            
+            // Results count
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '${_filteredEntries.length} result(s)',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey[600],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            
+            // Results list
+            Expanded(
+              child: _filteredEntries.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.search_off,
+                            size: 48,
+                            color: Colors.grey[400],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'No entries found',
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: _filteredEntries.length,
+                      itemBuilder: (context, i) {
+                        final item = _filteredEntries[i];
+                        final entry = item['entry'] as GlossaryEntry;
+                        final glossaryName = item['glossaryName'] as String;
+                        
+                        return ListTile(
+                          title: Text(
+                            '${entry.english} → ${entry.spanish}',
+                            style: const TextStyle(fontWeight: FontWeight.w500),
+                          ),
+                          subtitle: Text(
+                            '($glossaryName)',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                          onTap: () {
+                            widget.onEntrySelected(entry, glossaryName);
+                          },
+                          // Highlight matching text
+                          leading: CircleAvatar(
+                            backgroundColor: Colors.blue[100],
+                            child: Text(
+                              entry.english.isNotEmpty 
+                                  ? entry.english[0].toUpperCase()
+                                  : '?',
+                              style: const TextStyle(
+                                color: Colors.blue,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ],
     );
   }
 }

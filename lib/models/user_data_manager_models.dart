@@ -1,8 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+
 import 'notebook_models.dart';
 import 'library_models.dart';
 import 'strokes_models.dart';
 import 'detection_settings_models.dart';
+
+import '../services/glossary_service.dart';
+
 
 
 class UserDataManager {
@@ -64,7 +68,14 @@ class UserDataManager {
       print('Failed to load user data: $e');
     }
   }
-
+  
+  // Load library structure when needed
+  Future<List<FolderItem>> loadLibraryStructure(String userId) async {
+    final glossaryService = GlossaryService();
+    return await glossaryService.loadRootFolders();
+  }
+      
+  
   /// Save all user data from Firestore
   Future<void> saveUserData(String userId) async {
     try {
@@ -98,7 +109,6 @@ class UserDataManager {
       print('Failed to save user data: $e');
     }
   }
-
 
 
   /// Recursive save for library folders

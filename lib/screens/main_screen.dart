@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 
 import 'login_screen.dart';
 import 'symbols_screen.dart';
@@ -13,6 +12,7 @@ import 'package:senior_project/models/notebook_models.dart';
 import 'package:senior_project/models/library_models.dart';
 import 'package:senior_project/models/strokes_models.dart';
 import 'package:senior_project/models/user_data_manager_models.dart';
+import 'package:senior_project/services/drawing_settings.dart';
 
 import 'dart:math' as math;
 import 'dart:convert';
@@ -20,8 +20,16 @@ import 'dart:convert';
 // ==================== MAIN PAGE ====================
 
 class MainPage extends StatefulWidget {
-  
-  const MainPage({super.key}); 
+  final String? userID;
+  final List<FolderItem>? libraryStructure;
+  final List<UserCorrection>? userCorrections;
+
+  const MainPage({
+    super.key, 
+    this.userID,
+    this.libraryStructure,
+    this.userCorrections,
+  });
 
   @override
   State<MainPage> createState() => _MainPageState();
@@ -29,11 +37,13 @@ class MainPage extends StatefulWidget {
 
 class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin {
   
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  // final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  late String? userID;
   // ==================== SETTINGS ====================
   
   // These are now loaded from user preferences instead of static constants
-  double TIME_THRESHOLD_MS = 1000;    // Strokes within this time = same symbol
+  double TIME_THRESHOLD_MS = 700;    // Strokes within this time = same symbol
   double SPATIAL_THRESHOLD_PX = 2500; // Squared distance (50px * 50px)
   double MIN_SYMBOL_SIZE = 100;       // Minimum area (px²) for valid symbol
   
@@ -46,8 +56,9 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
 
   bool showSpanish = true; // true = Spanish, false = English
 
-  late List<FolderItem> libraryStructure;
-  late List<UserCorrection> userCorrections;
+
+  List<FolderItem> libraryStructure = [];
+  List<UserCorrection> userCorrections = [];
   
   List<DetectedSymbol> detectedSymbols = [];
   List<Offset> currentStrokePoints = [];
@@ -705,14 +716,21 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   void initState() {
     super.initState();
 
-    // Load user data after first frame
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final user = _auth.currentUser;
-      if (user != null) {
-        // Load all user data from Firebase
-        await UserDataManager().loadUserData(user.uid);
-      }
-    });
+    // Initialize from widget parameters or load from manager
+    userID = widget.userID;
+    libraryStructure = widget.libraryStructure ?? UserDataManager().libraryRootFolders;
+    userCorrections = widget.userCorrections ?? UserDataManager().corrections;
+
+    // If data wasn't provided and user is logged in, load it
+    if ((libraryStructure.isEmpty || userCorrections.isEmpty) && userID != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await UserDataManager().loadUserData(userID!);
+        setState(() {
+          libraryStructure = UserDataManager().libraryRootFolders;
+          userCorrections = UserDataManager().corrections;
+        });
+      });
+    }
 
     // Animation controller for any UI transitions
     _animationController = AnimationController(
@@ -728,24 +746,6 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     print('MainPage initialized with ${userCorrections.length} corrections');
 
   }
-
-  Future<void> _loadDetectionSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    final settingsJson = prefs.getString('detection_settings');
-    
-    if (settingsJson != null) {
-      final settings = jsonDecode(settingsJson);
-      setState(() {
-        TIME_THRESHOLD_MS = settings['timeThreshold'] ?? 1000;
-        // Note: spatialThreshold is stored as actual distance, need to square it
-        final spatialDistance = settings['spatialThreshold'] ?? 50;
-        SPATIAL_THRESHOLD_PX = spatialDistance * spatialDistance;
-        MIN_SYMBOL_SIZE = settings['minSymbolSize'] ?? 100;
-      });
-      
-    }
-  }
-
 
   Future<void> _saveUserCorrections() async {
     final prefs = await SharedPreferences.getInstance();
@@ -869,17 +869,17 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                 );
               },
             ),
-            // ListTile(
-            //   leading: const Icon(Icons.settings, color: Colors.white),
-            //   title: const Text('Settings', style: TextStyle(color: Colors.white)),
-            //   onTap: () {
-            //     Navigator.pop(context);
-            //     Navigator.push(
-            //       context,
-            //       MaterialPageRoute(builder: (context) => const SettingsScreen()),
-            //     );
-            //   },
-            // ),
+            ListTile(
+              leading: const Icon(Icons.settings, color: Colors.white),
+              title: const Text('Settings', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => SettingsScreen(userID: userID)),
+                );
+              },
+            ),
             const Spacer(),
             const Divider(color: Colors.white),
             ListTile(
@@ -1202,35 +1202,23 @@ class CanvasPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
       ..color = Colors.black
-      ..strokeWidth = 10.0
+      ..strokeWidth = drawingSettings.penWidth    // <<< HERE
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
 
-    // Draw completed strokes
-    for (var stroke in strokes) {
-      if (stroke.points.length > 1) {
-        final path = Path();
-        path.moveTo(stroke.points[0].dx, stroke.points[0].dy);
-        for (int i = 1; i < stroke.points.length; i++) {
-          path.lineTo(stroke.points[i].dx, stroke.points[i].dy);
-        }
-        canvas.drawPath(path, paint);
+    // Draw saved strokes
+    for (final stroke in strokes) {
+      for (int i = 0; i < stroke.points.length - 1; i++) {
+        canvas.drawLine(stroke.points[i], stroke.points[i + 1], paint);
       }
     }
 
-    // Draw current stroke being drawn
-    if (currentStroke.length > 1) {
-      final path = Path();
-      path.moveTo(currentStroke[0].dx, currentStroke[0].dy);
-      for (int i = 1; i < currentStroke.length; i++) {
-        path.lineTo(currentStroke[i].dx, currentStroke[i].dy);
-      }
-      canvas.drawPath(path, paint);
+    // Draw current stroke
+    for (int i = 0; i < currentStroke.length - 1; i++) {
+      canvas.drawLine(currentStroke[i], currentStroke[i + 1], paint);
     }
   }
 
   @override
-  bool shouldRepaint(CanvasPainter oldDelegate) {
-    return true;
-  }
+  bool shouldRepaint(CanvasPainter oldDelegate) => true;
 }

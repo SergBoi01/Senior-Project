@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:math';
 
 import '../models/library_models.dart';
-import '../widgets/library_item_card.dart';
+import '../widgets/library_item_card_widget.dart';
 import '../services/glossary_service.dart';
 import '../services/preferences_service.dart';
 import 'glossary_screen.dart';
