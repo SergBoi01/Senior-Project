@@ -2,7 +2,11 @@ import 'package:flutter/material.dart';
 import '../models/library_models.dart';
 import '../widgets/library_item_card.dart';
 import 'glossary_screen.dart';
+import 'csv_column_mapping_screen.dart';
 import 'dart:math';
+import 'package:file_picker/file_picker.dart';
+import 'package:csv/csv.dart';
+import 'dart:convert';
 
 class LibraryScreen extends StatefulWidget {
   final FolderItem? initialFolder; // For navigating into a specific folder
@@ -175,6 +179,90 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
+  // Import glossary from CSV file
+  Future<void> _importFromCSV() async {
+    // Can't import at root - must be inside a folder
+    if (_currentFolder == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('CSV files must be imported inside a folder')),
+      );
+      return;
+    }
+
+    try {
+      // Pick CSV file
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['csv'],
+        withData: true,
+      );
+
+      if (result == null || result.files.isEmpty) {
+        // User canceled the picker
+        return;
+      }
+
+      final file = result.files.first;
+      
+      if (file.bytes == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not read file')),
+        );
+        return;
+      }
+
+      // Parse CSV
+      String csvString = utf8.decode(file.bytes!);
+      List<List<dynamic>> csvData = const CsvToListConverter().convert(csvString);
+
+      if (csvData.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('CSV file is empty')),
+        );
+        return;
+      }
+
+      if (csvData.length < 2) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('CSV must have at least a header row and one data row')),
+        );
+        return;
+      }
+
+      // Navigate to column mapping screen
+      final glossary = await Navigator.push<GlossaryItem>(
+        context,
+        MaterialPageRoute(
+          builder: (context) => CsvColumnMappingScreen(
+            csvData: csvData,
+            parentFolderId: _currentFolder!.id,
+          ),
+        ),
+      );
+
+      // If glossary was created, add it to current folder
+      if (glossary != null) {
+        setState(() {
+          _currentFolder!.addChild(glossary);
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Successfully imported ${glossary.entries.length} entries'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error importing CSV: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   // Show dialog to choose between folder and glossary
   void _showCreateDialog() {
     showDialog(
@@ -200,6 +288,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 onTap: () {
                   Navigator.pop(context);
                   _createGlossary();
+                },
+              ),
+            // CSV import option (only when inside a folder)
+            if (_currentFolder != null)
+              ListTile(
+                leading: Icon(Icons.upload_file),
+                title: Text('Import from CSV'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _importFromCSV();
                 },
               ),
           ],
