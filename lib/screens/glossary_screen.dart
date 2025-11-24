@@ -149,12 +149,13 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
         _saveEntryToFirestore(index);
       });
       
+      print('Saved symbol with ${_currentStrokes.length} strokes');
+      
       // Clear everything
       _currentStrokes.clear();
       _currentStrokePoints.clear();
       _currentStrokeStartTime = null;
       
-      print('Saved symbol with ${_currentStrokes.length} strokes');
     }
   }
 
@@ -670,12 +671,15 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                 }
               },
               child: SizedBox.expand(
-                child: CustomPaint(
-                  painter: CanvasPainter(
-                    strokes: _currentStrokes,
-                    currentStroke: _currentStrokePoints,
+                child: RepaintBoundary(
+                  key: _canvasKey,
+                  child: CustomPaint(
+                    painter: CanvasPainter(
+                      strokes: _currentStrokes,
+                      currentStroke: _currentStrokePoints,
+                    ),
                   ),
-                ),
+                )
               ),
             ),
           ),
