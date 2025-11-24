@@ -20,12 +20,13 @@ class GlossaryScreen extends StatefulWidget {
 class _GlossaryScreenState extends State<GlossaryScreen> {
   // State Variables
   late GlossaryItem glossaryItem;
-  int? editingIndex; // Currently editing row index
-  bool showCanvas = false; // Toggle between table view and canvas view
+  int? editingIndex;
+  bool showCanvas = false;
   
-  // Loading and error states
+  // Loading and error states - SEPARATED
   bool _isLoading = false;
-  bool _isSaving = false;
+  Set<int> _savingIndices = {}; // Track which entries are being saved
+  Set<int> _deletingIndices = {}; // Track which entries are being deleted
   String? _errorMessage;
   
   // Firestore service
@@ -34,11 +35,9 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   // Canvas/Drawing controllers
   final GlobalKey _canvasKey = GlobalKey();
   final ScrollController _scrollController = ScrollController();
-  
-  // Text input controller for editing cells
   final TextEditingController _editController = TextEditingController();
 
-  // NEW: Stroke tracking for symbol detection
+  // Stroke tracking for symbol detection
   List<Stroke> _currentStrokes = [];
   List<Offset> _currentStrokePoints = [];
   DateTime? _currentStrokeStartTime;
@@ -46,13 +45,10 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   @override
   void initState() {
     super.initState();
-    // Use provided glossaryItem or create a new one if none provided
     if (widget.glossaryItem != null) {
       glossaryItem = widget.glossaryItem!;
-      // Load entries from Firestore
       _loadEntries();
     } else {
-      // Fallback: create a temporary glossary item (for backward compatibility)
       glossaryItem = GlossaryItem(
         id: 'temp',
         name: 'Glossary',
@@ -86,27 +82,29 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     }
   }
 
-  /// Save entry to Firestore
+  /// Save entry to Firestore - NON-BLOCKING
   Future<void> _saveEntryToFirestore(int index) async {
     if (index < 0 || index >= glossaryItem.entries.length) return;
 
     setState(() {
-      _isSaving = true;
+      _savingIndices.add(index);
       _errorMessage = null;
     });
 
     try {
       final entry = glossaryItem.entries[index];
       await _glossaryService.saveEntry(glossaryItem.id, entry, index);
-      setState(() {
-        _isSaving = false;
-      });
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Failed to save entry: $e';
-        _isSaving = false;
-      });
       if (mounted) {
+        setState(() {
+          _savingIndices.remove(index);
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Failed to save entry: $e';
+          _savingIndices.remove(index);
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(_errorMessage!)),
         );
@@ -114,9 +112,39 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     }
   }
 
+  /// Delete entry - INDEPENDENT OPERATION
+  Future<void> _deleteEntry(int index) async {
+    final entry = glossaryItem.entries[index];
+    
+    setState(() {
+      _deletingIndices.add(index);
+    });
+
+    try {
+      if (entry.id != null) {
+        await _glossaryService.deleteEntry(glossaryItem.id, entry.id!);
+      }
+      
+      if (mounted) {
+        setState(() {
+          glossaryItem.deleteEntry(index);
+          _deletingIndices.remove(index);
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _deletingIndices.remove(index);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to delete entry: $e')),
+        );
+      }
+    }
+  }
+
   // Canvas/Symbol Methods
   
-  /// Captures the current canvas drawing as an image
   Future<Uint8List?> _captureCanvas() async {
     try {
       RenderRepaintBoundary boundary =
@@ -130,23 +158,17 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     }
   }
 
-  /// Saves the drawn symbol to the current glossary entry
-  /// UPDATED: Now saves both image and strokes
   void _saveSymbol() async {
     Uint8List? imageData = await _captureCanvas();
     
     if (editingIndex != null && imageData != null) {
+      final index = editingIndex!;
+      
       setState(() {
-        // Save both image and strokes
-        glossaryItem.entries[editingIndex!].symbolImage = imageData;
-        glossaryItem.entries[editingIndex!].strokes = List.from(_currentStrokes);
-        
+        glossaryItem.entries[index].symbolImage = imageData;
+        glossaryItem.entries[index].strokes = List.from(_currentStrokes);
         showCanvas = false;
-        final index = editingIndex!;
         editingIndex = null;
-        
-        // Save to Firestore
-        _saveEntryToFirestore(index);
       });
       
       print('Saved symbol with ${_currentStrokes.length} strokes');
@@ -156,18 +178,17 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
       _currentStrokePoints.clear();
       _currentStrokeStartTime = null;
       
+      // Save to Firestore in background
+      _saveEntryToFirestore(index);
     }
   }
 
   // Cell Interaction Methods
   
-  /// Handles tap events on table cells
   void _onCellTap(int rowIndex, int columnIndex) {
     if (columnIndex == 4) {
-      // Symbol column, show drawing canvas or symbol preview
       final entry = glossaryItem.entries[rowIndex];
       
-      // If symbol already exists, show preview/replace dialog
       if (entry.symbolImage != null) {
         showDialog(
           context: context,
@@ -176,7 +197,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Display existing symbol image
                 Image.memory(
                   entry.symbolImage!,
                   width: 600,
@@ -184,7 +204,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                   fit: BoxFit.contain,
                 ),
                 SizedBox(height: 16),
-                // Show stroke count if available
                 if (entry.strokes != null && entry.strokes!.isNotEmpty)
                   Text(
                     '${entry.strokes!.length} stroke(s)',
@@ -200,7 +219,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
             actionsAlignment: MainAxisAlignment.spaceEvenly,
             actionsPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             actions: [
-              // Cancel button
               TextButton(
                 onPressed: () => Navigator.pop(context),
                 style: TextButton.styleFrom(
@@ -209,16 +227,14 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                 ),
                 child: Text('Cancel', style: TextStyle(fontSize: 15)),
               ),
-              // Delete symbol button
               TextButton(
                 onPressed: () {
                   setState(() {
                     entry.symbolImage = null;
-                    entry.strokes = null; // Also clear strokes
-                    // Save to Firestore
-                    _saveEntryToFirestore(rowIndex);
+                    entry.strokes = null;
                   });
                   Navigator.pop(context);
+                  _saveEntryToFirestore(rowIndex);
                 },
                 style: TextButton.styleFrom(
                   foregroundColor: Colors.red,
@@ -226,11 +242,9 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                 ),
                 child: Text('Delete Symbol', style: TextStyle(fontSize: 15)),
               ),
-              // Replace drawing button
               ElevatedButton(
                 onPressed: () {
                   Navigator.pop(context);
-                  // Open canvas to draw new symbol
                   setState(() {
                     editingIndex = rowIndex;
                     showCanvas = true;
@@ -247,17 +261,14 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
           ),
         );
       } else {
-        // No symbol yet, open canvas directly
         setState(() {
           editingIndex = rowIndex;
           showCanvas = true;
         });
       }
     } else {
-      // Text columns - show text input dialog
       String currentValue = '';
       
-      // Get current value based on column
       switch (columnIndex) {
         case 0:
           currentValue = glossaryItem.entries[rowIndex].english;
@@ -275,7 +286,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
       
       _editController.text = currentValue;
       
-      // Show text editing dialog
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
@@ -291,7 +301,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                 autofocus: true,
                 style: TextStyle(color: Colors.black),
                 onChanged: (value) {
-                  setDialogState(() {}); // Rebuild to show/hide clear button
+                  setDialogState(() {});
                 },
                 decoration: InputDecoration(
                   border: OutlineInputBorder(
@@ -303,7 +313,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                   focusedBorder: OutlineInputBorder(
                     borderSide: BorderSide(color: Colors.black, width: 2),
                   ),
-                  // Clear button that appears when text is not empty
                   suffixIcon: _editController.text.isNotEmpty
                       ? IconButton(
                           icon: Icon(Icons.clear, color: Colors.grey),
@@ -319,17 +328,14 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
             },
           ),
           actions: [
-            // Cancel button
             TextButton(
               onPressed: () => Navigator.pop(context),
               style: TextButton.styleFrom(foregroundColor: Colors.black),
               child: Text('Cancel'),
             ),
-            // Save button
             ElevatedButton(
               onPressed: () {
                 setState(() {
-                  // Update the appropriate field based on column
                   switch (columnIndex) {
                     case 0:
                       glossaryItem.entries[rowIndex].english = _editController.text;
@@ -344,10 +350,9 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                       glossaryItem.entries[rowIndex].synonym = _editController.text;
                       break;
                   }
-                  // Save to Firestore
-                  _saveEntryToFirestore(rowIndex);
                 });
                 Navigator.pop(context);
+                _saveEntryToFirestore(rowIndex);
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.white,
@@ -363,22 +368,21 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
 
   // Entry Management Methods
   
-  /// Adds a new empty entry to the glossary
   void _addNewEntry() {
+    final newEntry = GlossaryEntry(
+      english: '',
+      spanish: '',
+      definition: '',
+      synonym: '',
+    );
+    
     setState(() {
-      final newEntry = GlossaryEntry(
-        english: '',
-        spanish: '',
-        definition: '',
-        synonym: '',
-      );
       glossaryItem.addEntry(newEntry);
-      final index = glossaryItem.entries.length - 1;
-      // Save to Firestore
-      _saveEntryToFirestore(index);
     });
+    
+    final index = glossaryItem.entries.length - 1;
+    _saveEntryToFirestore(index);
 
-    // Scroll to the bottom of the list to show the newly added entry
     Future.delayed(Duration(milliseconds: 100), () {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
@@ -400,7 +404,8 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
         backgroundColor: Colors.grey[800],
         iconTheme: IconThemeData(color: Colors.white),
         actions: [
-          if (_isSaving)
+          // Show indicator if ANY entry is being saved
+          if (_savingIndices.isNotEmpty)
             Padding(
               padding: EdgeInsets.all(16.0),
               child: SizedBox(
@@ -414,7 +419,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
             ),
         ],
       ),
-      // Toggle between canvas view for drawing and table view for entries
       body: _isLoading
           ? Center(child: CircularProgressIndicator())
           : showCanvas
@@ -423,11 +427,9 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     );
   }
 
-  /// Builds the main table view showing all glossary entries
   Widget _buildTableView() {
     return Column(
       children: [
-        // Header Row
         Container(
           color: Colors.black,
           child: Row(
@@ -437,18 +439,19 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
               _buildHeaderCell('Definition', flex: 3),
               _buildHeaderCell('Synonym', flex: 2),
               _buildHeaderCell('Symbol', flex: 1),
-              SizedBox(width: 48), // Space for delete button
+              SizedBox(width: 48),
             ],
           ),
         ),
         
-        // Data Rows
         Expanded(
           child: ListView.builder(
             controller: _scrollController,
             itemCount: glossaryItem.entries.length,
             itemBuilder: (context, index) {
               final entry = glossaryItem.entries[index];
+              final isDeleting = _deletingIndices.contains(index);
+              
               return Container(
                 decoration: BoxDecoration(
                   border: Border(bottom: BorderSide(color: Colors.grey[400]!)),
@@ -461,40 +464,23 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                     _buildDataCell(entry.definition, index, 2, flex: 3),
                     _buildDataCell(entry.synonym, index, 3, flex: 2),
                     _buildSymbolCell(entry, index, flex: 1),
-                    // Delete button for each row
-                    IconButton(
-                      icon: Icon(Icons.delete, color: Colors.red),
-                      onPressed: _isSaving ? null : () async {
-                        final entry = glossaryItem.entries[index];
-                        if (entry.id != null) {
-                          // Delete from Firestore
-                          setState(() {
-                            _isSaving = true;
-                          });
-                          try {
-                            await _glossaryService.deleteEntry(glossaryItem.id, entry.id!);
-                            setState(() {
-                              glossaryItem.deleteEntry(index);
-                              _isSaving = false;
-                            });
-                          } catch (e) {
-                            setState(() {
-                              _isSaving = false;
-                            });
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Failed to delete entry: $e')),
-                              );
-                            }
-                          }
-                        } else {
-                          // Just remove from local list if not saved yet
-                          setState(() {
-                            glossaryItem.deleteEntry(index);
-                          });
-                        }
-                      },
-                    ),
+                    // Delete button - shows loading only for this row
+                    isDeleting
+                        ? Padding(
+                            padding: EdgeInsets.all(12.0),
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
+                              ),
+                            ),
+                          )
+                        : IconButton(
+                            icon: Icon(Icons.delete, color: Colors.red),
+                            onPressed: () => _deleteEntry(index),
+                          ),
                   ],
                 ),
               );
@@ -502,33 +488,21 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
           ),
         ),
         
-        // Add Button
+        // Add Button - ALWAYS ENABLED
         Padding(
           padding: const EdgeInsets.all(16.0),
           child: FloatingActionButton(
-            onPressed: _isSaving ? null : _addNewEntry,
+            onPressed: _addNewEntry,
             backgroundColor: Colors.black,
             foregroundColor: Colors.white,
             tooltip: 'Add new entry',
-            child: _isSaving
-                ? SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                    ),
-                  )
-                : Icon(Icons.add),
+            child: Icon(Icons.add),
           ),
         ),
       ],
     );
   }
 
-  // Helper Widget Methods
-  
-  /// Builds a header cell for the table
   Widget _buildHeaderCell(String title, {int flex = 1}) {
     return Expanded(
       flex: flex,
@@ -547,7 +521,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     );
   }
 
-  /// Builds a data cell for text content
   Widget _buildDataCell(String text, int rowIndex, int columnIndex, {int flex = 1}) {
     return Expanded(
       flex: flex,
@@ -558,7 +531,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
           height: 56,
           alignment: Alignment.center,
           child: Text(
-            text.isEmpty ? '➕' : text, // Show plus icon if empty
+            text.isEmpty ? '➕' : text,
             style: TextStyle(
               color: text.isEmpty ? Colors.grey : Colors.black,
               fontSize: 13,
@@ -571,7 +544,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     );
   }
 
-  /// Builds a symbol cell that displays an image or draw icon
   Widget _buildSymbolCell(GlossaryEntry entry, int rowIndex, {int flex = 1}) {
     return Expanded(
       flex: flex,
@@ -581,7 +553,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
           padding: EdgeInsets.all(8),
           height: 56,
           alignment: Alignment.center,
-          // Display symbol image if exists, otherwise show draw icon
           child: entry.symbolImage != null
               ? Image.memory(entry.symbolImage!, width: 40, height: 40)
               : Icon(Icons.draw, color: Colors.grey),
@@ -590,12 +561,9 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     );
   }
 
-  /// Builds the canvas view for drawing symbols
-  /// UPDATED: Now captures strokes with GestureDetector
   Widget _buildCanvasView() {
     return Column(
       children: [
-        // Toolbar
         Padding(
           padding: const EdgeInsets.all(8.0),
           child: Row(
@@ -605,13 +573,11 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
               Spacer(),
-
               Text(
                 '${_currentStrokes.length} stroke(s)',
                 style: TextStyle(fontSize: 12, color: Colors.grey),
               ),
               SizedBox(width: 16),
-
               IconButton(
                 icon: Icon(Icons.undo),
                 onPressed: () {
@@ -620,7 +586,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                   }
                 },
               ),
-
               IconButton(
                 icon: Icon(Icons.clear),
                 onPressed: () {
@@ -633,8 +598,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
             ],
           ),
         ),
-
-        // CANVAS — identical behavior to main_screen.dart
         Expanded(
           child: Container(
             margin: const EdgeInsets.all(16),
@@ -684,8 +647,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
             ),
           ),
         ),
-
-        // Buttons
         Padding(
           padding: const EdgeInsets.all(16.0),
           child: Row(
@@ -702,7 +663,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                 },
                 child: Text('Cancel'),
               ),
-
               ElevatedButton(
                 onPressed: _currentStrokes.isNotEmpty ? _saveSymbol : null,
                 style: ElevatedButton.styleFrom(
@@ -718,14 +678,10 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     );
   }
 
-
-
   @override
   void dispose() {
-    // Clean up controllers
     _scrollController.dispose();
     _editController.dispose();
-    // Clear stroke tracking
     _currentStrokes.clear();
     _currentStrokePoints.clear();
     super.dispose();
