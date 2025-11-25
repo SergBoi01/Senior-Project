@@ -67,26 +67,40 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void bypassLogin() async {
     setState(() => _isLoading = true);
-    
-    // Use a test user ID for bypass
-    const testUserId = 'test_user_bypass';
-    
-    await UserDataManager().loadUserData(testUserId);
-    
-    if (!mounted) return;
-    
-    setState(() => _isLoading = false);
-    
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (_) => MainPage(
-          userID: testUserId,
-          libraryStructure: UserDataManager().libraryRootFolders,
-          userCorrections: UserDataManager().corrections,
-        ),
-      ),
-    );
+    try {
+      // Try to sign in the guest user.
+      UserCredential cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: 'flutterdartguest123@gmail.com',
+        password: 'flutterdartguest123',
+      );
+      onLoginSuccess(cred.user!.uid);
+    } on FirebaseAuthException catch (e) {
+      // If the user does not exist, create it.
+      if (e.code == 'user-not-found') {
+        try {
+          UserCredential cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+            email: 'flutterdartguest123@gmail.com',
+            password: 'flutterdartguest123',
+          );
+          onLoginSuccess(cred.user!.uid);
+        } catch (e) {
+          setState(() {
+            errorMessage = 'Failed to create guest user.';
+            _isLoading = false;
+          });
+        }
+      } else {
+        setState(() {
+          errorMessage = 'Bypass login failed.';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        errorMessage = 'An unexpected error occurred during bypass login.';
+        _isLoading = false;
+      });
+    }
   }
 
   @override

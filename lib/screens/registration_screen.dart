@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:senior_project/models/user_data_manager_models.dart';
+import 'package:senior_project/screens/main_screen.dart';
 
 class RegistrationScreen extends StatefulWidget {
   const RegistrationScreen({super.key});
@@ -10,39 +12,62 @@ class RegistrationScreen extends StatefulWidget {
 
 class _RegistrationScreenState extends State<RegistrationScreen> {
   final TextEditingController _emailController = TextEditingController();
-final TextEditingController _passwordController = TextEditingController();
-final TextEditingController _confirmPasswordController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  final TextEditingController _confirmPasswordController = TextEditingController();
   bool _isPasswordVisible = false;
   bool _isConfirmPasswordVisible = false;
 
-void _register() async {
-  // Check if passwords match
-  if (_passwordController.text != _confirmPasswordController.text) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Passwords do not match')),
+  void _register() async {
+    if (_passwordController.text != _confirmPasswordController.text) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Passwords do not match')),
+      );
+      return;
+    }
+
+    // Show a loading indicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
     );
-    return;
+
+    try {
+      UserCredential cred =
+          await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
+
+      String userID = cred.user!.uid;
+      // Initialize user data, though it will be empty for a new user
+      await UserDataManager().loadUserData(userID);
+
+      if (!mounted) return;
+
+      // Dismiss the loading indicator before navigating
+      Navigator.pop(context);
+
+      // Navigate to the main page
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => MainPage(
+            userID: userID,
+            libraryStructure: UserDataManager().libraryRootFolders,
+            userCorrections: UserDataManager().corrections,
+          ),
+        ),
+      );
+    } catch (e) {
+      // Dismiss the loading indicator
+      Navigator.pop(context);
+      // Show error message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Registration failed: ${e.toString()}')),
+      );
+    }
   }
-
-  try {
-  // Create user account with Firebase
-  await FirebaseAuth.instance.createUserWithEmailAndPassword(
-    email: _emailController.text.trim(),
-    password: _passwordController.text,
-  );
-
-  // Show success message
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text('Account created successfully!')),
-  );
-
-} catch (e) {
-  // Show error message
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text('Registration failed: ${e.toString()}')),
-  );
-}
-}
   @override
   Widget build(BuildContext context) {
     return Scaffold(

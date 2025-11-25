@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "459497130544",
-    "project_id": "senior-project-cb7e5",
-    "storage_bucket": "senior-project-cb7e5.firebasestorage.app"
+    "project_number": "542793890474",
+    "project_id": "personal-test-e529b",
+    "storage_bucket": "personal-test-e529b.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:459497130544:android:78637ea33fde1e0c30fbf5",
+        "mobilesdk_app_id": "1:542793890474:android:968f34ece92ef546c02ed3",
         "android_client_info": {
           "package_name": "com.example.senior_project"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyC88EduhLMEwKgjUcwo1bymcp_dO5uPEzY"
+          "current_key": "AIzaSyDEyXbXqbVk8Fo_f1rrhAdUwaX1CLZCbK0"
         }
       ],
       "services": {

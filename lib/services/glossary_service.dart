@@ -41,13 +41,14 @@ class GlossaryService {
       // Generate entry ID if it doesn't exist (for new entries)
       String entryId = entry.id ?? 'entry_${DateTime.now().millisecondsSinceEpoch}_$index';
       
-      // Upload symbol image to Storage if it exists
+      // Upload symbol image to Storage if it exists and is not empty
       String? symbolImageUrl;
-      if (entry.symbolImage != null) {
+      if (entry.symbolImage != null && entry.symbolImage!.isNotEmpty) {
         symbolImageUrl = await _uploadSymbolImage(glossaryId, entryId, entry.symbolImage!);
       } else {
-        // If symbol was deleted, remove from Storage
+        // If symbol was deleted or is empty, remove from Storage
         await _deleteSymbolImage(glossaryId, entryId);
+        symbolImageUrl = null;
       }
 
       // Serialize strokes to JSON
@@ -186,8 +187,31 @@ class GlossaryService {
       final ref = _storage.ref().child(_getSymbolPath(glossaryId, entryId));
       await ref.delete();
     } catch (e) {
-      // Ignore error if file doesn't exist
-      debugPrint('Error deleting symbol image (may not exist): $e');
+      // Silently ignore errors if the object does not exist, as we might be trying
+      // to delete a file that was never uploaded in the first place.
+      if (e is FirebaseException && e.code == 'object-not-found') {
+        return;
+      }
+      // Log other errors for debugging, but don't crash the app.
+      debugPrint('Non-fatal error while deleting symbol image (may not exist): $e');
+    }
+  }
+
+  /// Create a new glossary in Firestore and return its ID
+  Future<String> createGlossary(GlossaryItem glossary) async {
+    if (_userId == null) throw Exception('User not logged in');
+    try {
+      // Use .add() to let Firestore generate the ID, then retrieve the generated document
+      DocumentReference docRef =
+          await _firestore.collection('users/$_userId/glossaries').add({
+        'name': glossary.name,
+        'parentId': glossary.parentId,
+        'isChecked': glossary.isChecked,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      return docRef.id;
+    } catch (e) {
+      throw Exception('Failed to create glossary: $e');
     }
   }
 

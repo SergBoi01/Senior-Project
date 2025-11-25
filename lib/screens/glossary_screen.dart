@@ -92,6 +92,22 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     });
 
     try {
+      // If the glossary has a temporary ID, it's a new glossary that needs to be created first.
+      if (glossaryItem.id == 'temp') {
+        // The parentId is not available on this screen, so new glossaries are created at the root.
+        // The name may also be the default 'Glossary'. This is a limitation of the current architecture.
+        final newId = await _glossaryService.createGlossary(glossaryItem);
+        setState(() {
+          glossaryItem = GlossaryItem(
+            id: newId,
+            name: glossaryItem.name,
+            isChecked: glossaryItem.isChecked,
+            parentId: glossaryItem.parentId,
+            entries: glossaryItem.entries,
+          );
+        });
+      }
+
       final entry = glossaryItem.entries[index];
       await _glossaryService.saveEntry(glossaryItem.id, entry, index);
       if (mounted) {
