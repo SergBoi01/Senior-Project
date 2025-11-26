@@ -393,23 +393,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(
-                              children: [
-                                const Expanded(
-                                  child: Text(
-                                    'Pen Size',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                            const Text(
+                              'Pen Size',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              // VV change to the pen width variable
-                              '${drawingSettings.penWidth} px',
+                              '${drawingSettings.penWidth.toInt()} px',
                               style: TextStyle(
                                 fontSize: 18,
                                 color: Colors.blue[700],
@@ -422,10 +415,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               max: 30,
                               divisions: 29,
                               label: "${drawingSettings.penWidth.toInt()}",
+
+                              // REAL-TIME update for canvas
                               onChanged: (value) {
-                                setState(() {
+                                setState((){
                                   drawingSettings.setPenWidth(value);
                                 });
+                              },
+
+                              // SAVE to Firestore only on release
+                              onChangeEnd: (value) async {
+                                if (widget.userID == null) return;
+
+                                UserDataManager().penWidth = value;
+                                await UserDataManager().saveUserData(widget.userID!);
+
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Pen size saved')),
+                                  );
+                                }
                               },
                             ),
                           ],
@@ -433,6 +442,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                   ),
+
 
                   const Divider(thickness: 2, height: 32),
 

@@ -1,14 +1,14 @@
+// screens/library_screen.dart
 import 'package:flutter/material.dart';
 import 'dart:math';
 
 import '../models/library_models.dart';
 import '../widgets/library_item_card_widget.dart';
 import '../services/glossary_service.dart';
-import '../services/preferences_service.dart';
 import 'glossary_screen.dart';
 
 class LibraryScreen extends StatefulWidget {
-  final FolderItem? initialFolder; // For navigating into a specific folder
+  final FolderItem? initialFolder;
 
   const LibraryScreen({super.key, this.initialFolder});
 
@@ -17,173 +17,96 @@ class LibraryScreen extends StatefulWidget {
 }
 
 class _LibraryScreenState extends State<LibraryScreen> {
-  // Root level storage - only folders (glossaries are inside folders)
   List<FolderItem> _rootFolders = [];
-
-  // Folder navigation stack to track current location
   final List<FolderItem> _folderStack = [];
 
-  // Firestore service
   final GlossaryService _glossaryService = GlossaryService();
-  
-  // SharedPreferences service
-  final PreferencesService _preferencesService = PreferencesService();
-  
-  // Loading state
+
   bool _isLoading = false;
 
-  // Get current folder (null if at root)
   FolderItem? get _currentFolder => _folderStack.isEmpty ? null : _folderStack.last;
-
-  // Get items to display in current location (folders + glossaries)
-  List<dynamic> get _currentItems {
-    if (_currentFolder == null) {
-      // At root: only show folders
-      return _rootFolders;
-    } else {
-      // Inside a folder: show both folders and glossaries
-      return _currentFolder!.children;
-    }
-  }
+  List<dynamic> get _currentItems => _currentFolder?.children ?? _rootFolders;
 
   @override
   void initState() {
     super.initState();
-    // If navigating into a specific folder, set up the stack
     if (widget.initialFolder != null) {
       _folderStack.add(widget.initialFolder!);
     } else {
-      // Load library structure from Firestore
       _loadLibrary();
     }
   }
 
-  /// Load library structure from SharedPreferences and Firestore
   Future<void> _loadLibrary() async {
     if (!mounted) return;
-    
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
     try {
-      // First, try to load from SharedPreferences for fast local access
-      try {
-        final cachedFolders = await _preferencesService.loadRootFolders();
-        if (cachedFolders.isNotEmpty && mounted) {
-          setState(() {
-            _rootFolders = cachedFolders;
-            _isLoading = false;
-          });
-          debugPrint('Loaded library from SharedPreferences');
-        }
-      } catch (e) {
-        debugPrint('Error loading from SharedPreferences: $e');
-      }
-
-      // Then sync with Firestore in the background
-      try {
-        final rootFolders = await _glossaryService.loadRootFolders();
-        if (mounted) {
-          setState(() {
-            _rootFolders = rootFolders;
-            _isLoading = false;
-          });
-          // Save to SharedPreferences for next time
-          await _preferencesService.saveRootFolders(rootFolders);
-          debugPrint('Synced library with Firestore and saved to SharedPreferences');
-        }
-      } catch (e) {
-        debugPrint('Error loading from Firestore: $e');
-        // If Firestore fails but we have cached data, that's okay
-        if (_rootFolders.isEmpty && mounted) {
-          setState(() {
-            _isLoading = false;
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to sync with server. Using cached data.')),
-          );
-        }
-      }
+      debugPrint('[LIB] _loadLibrary: start');
+      final rootFolders = await _glossaryService.loadRootFolders();
+      if (!mounted) return;
+      setState(() {
+        _rootFolders = rootFolders;
+        _isLoading = false;
+      });
+      debugPrint('[LIB] _loadLibrary: loaded ${_rootFolders.length} root folders');
     } catch (e) {
-      debugPrint('Error loading library: $e');
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load library: $e')),
-        );
-      }
+      debugPrint('[LIB] _loadLibrary FAILED: $e');
+      if (mounted) setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to load library: $e')),
+      );
     }
   }
 
-  /// Save library structure to Firestore and SharedPreferences
-  Future<void> _saveLibrary() async {
-    try {
-      // Save all root folders to Firestore (which will recursively save their children)
-      for (var folder in _rootFolders) {
-        await _saveFolderRecursive(folder);
-      }
-      
-      // Also save to SharedPreferences for local caching
-      await _preferencesService.saveRootFolders(_rootFolders);
-      debugPrint('Saved library to Firestore and SharedPreferences');
-    } catch (e) {
-      debugPrint('Error saving library: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save library: $e')),
-        );
-      }
-    }
-  }
-
-  /// Recursively save a folder and all its children
   Future<void> _saveFolderRecursive(FolderItem folder) async {
-    // Save the folder itself
-    await _glossaryService.saveFolder(folder);
-    
-    // Save all children
+    // Ensure folder metadata saved (should already be saved when created/renamed)
+    await _glossary_service_saveFolderSafe(folder);
     for (var child in folder.children) {
       if (child is FolderItem) {
-        // Recursively save subfolders
         await _saveFolderRecursive(child);
       } else if (child is GlossaryItem) {
-        // Save glossary (already handled when created, but ensure it's saved)
-        await _glossaryService.saveGlossary(child);
+        // Ensure glossary metadata saved if needed
+        await _glossary_service_saveGlossarySafe(child);
       }
     }
   }
 
-  // Generate unique ID
-  String _generateId() {
-    return DateTime.now().millisecondsSinceEpoch.toString() +
-        Random().nextInt(1000).toString();
+  Future<void> _glossary_service_saveFolderSafe(FolderItem folder) async {
+    try {
+      await _glossaryService.saveFolder(folder);
+      debugPrint('[LIB] saved folder ${folder.id}');
+    } catch (e) {
+      debugPrint('[LIB] saveFolder FAILED for ${folder.id}: $e');
+    }
   }
 
-  // Navigate into a folder
+  Future<void> _glossary_service_saveGlossarySafe(GlossaryItem g) async {
+    try {
+      await _glossaryService.saveGlossary(g);
+      debugPrint('[LIB] saved glossary ${g.id}');
+    } catch (e) {
+      debugPrint('[LIB] saveGlossary FAILED for ${g.id}: $e');
+    }
+  }
+
+  String _generateId() => DateTime.now().millisecondsSinceEpoch.toString() + Random().nextInt(1000).toString();
+
   void _navigateToFolder(FolderItem folder) {
-    setState(() {
-      _folderStack.add(folder);
-    });
+    setState(() => _folderStack.add(folder));
   }
 
-  // Navigate back
   void _navigateBack() {
     if (_folderStack.isNotEmpty) {
-      setState(() {
-        _folderStack.removeLast();
-      });
+      setState(() => _folderStack.removeLast());
     } else {
       Navigator.pop(context);
     }
   }
 
-  // Create new folder in current location
   void _createFolder() {
     final TextEditingController nameController = TextEditingController();
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -197,44 +120,34 @@ class _LibraryScreenState extends State<LibraryScreen> {
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel')),
           ElevatedButton(
             onPressed: () async {
-              if (nameController.text.trim().isNotEmpty) {
-                final folder = FolderItem(
-                  id: _generateId(),
-                  name: nameController.text.trim(),
-                  parentId: _currentFolder?.id,
-                );
-                
-                setState(() {
-                  if (_currentFolder == null) {
-                    // Add to root level
-                    _rootFolders.add(folder);
-                  } else {
-                    // Add to current folder (subfolder)
-                    _currentFolder!.addChild(folder);
-                  }
-                });
-                
-                // Save folder to Firestore and SharedPreferences
-                try {
-                  await _glossaryService.saveFolder(folder);
-                  await _preferencesService.saveFolder(folder);
-                  // Save entire library structure to ensure consistency
-                  await _saveLibrary();
-                } catch (e) {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Failed to save folder: $e')),
-                    );
-                  }
+              if (nameController.text.trim().isEmpty) return;
+
+              final folder = FolderItem(
+                id: _generateId(),
+                name: nameController.text.trim(),
+                parentId: _currentFolder?.id,
+              );
+
+              setState(() {
+                if (_currentFolder == null) _rootFolders.add(folder);
+                else _currentFolder!.addChild(folder);
+              });
+
+              Navigator.pop(context);
+
+              // Persist immediately
+              try {
+                debugPrint('[LIB] createFolder: saving folder id=${folder.id}');
+                await _glossaryService.saveFolder(folder);
+                debugPrint('[LIB] createFolder: saved folder id=${folder.id}');
+              } catch (e) {
+                debugPrint('[LIB] createFolder FAILED: $e');
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to save folder: $e')));
                 }
-                
-                Navigator.pop(context);
               }
             },
             child: Text('Create'),
@@ -244,9 +157,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  // Create new glossary in current location
   void _createGlossary() {
-    // Can't create glossary at root - must be inside a folder
     if (_currentFolder == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Glossaries must be created inside a folder')),
@@ -255,7 +166,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
 
     final TextEditingController nameController = TextEditingController();
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -269,45 +180,34 @@ class _LibraryScreenState extends State<LibraryScreen> {
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel')),
           ElevatedButton(
             onPressed: () async {
-              // Name is mandatory
               if (nameController.text.trim().isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Please enter a glossary name')),
-                );
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Please enter a glossary name')));
                 return;
               }
-              
+
               final glossary = GlossaryItem(
                 id: _generateId(),
                 name: nameController.text.trim(),
                 parentId: _currentFolder!.id,
               );
-              
-              // Save glossary to Firestore and SharedPreferences
+
+              setState(() => _currentFolder!.addChild(glossary));
+              Navigator.pop(context);
+
+              // Persist glossary metadata immediately
               try {
+                debugPrint('[LIB] createGlossary: saving glossary id=${glossary.id}');
                 await _glossaryService.saveGlossary(glossary);
-                await _preferencesService.saveGlossary(glossary);
-                setState(() {
-                  _currentFolder!.addChild(glossary);
-                });
-                // Save parent folder to update its children list
-                await _preferencesService.saveFolder(_currentFolder!);
-                Navigator.pop(context);
-                // Show success message
+                debugPrint('[LIB] createGlossary: saved glossary id=${glossary.id}');
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Glossary created successfully')),
+                  SnackBar(content: Text('Glossary created. Remember to Save inside the Glossary screen.')),
                 );
               } catch (e) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Failed to create glossary: $e')),
-                );
+                debugPrint('[LIB] createGlossary FAILED: $e');
+                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to save glossary: $e')));
               }
             },
             child: Text('Create'),
@@ -317,7 +217,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  // Show dialog to choose between folder and glossary
   void _showCreateDialog() {
     showDialog(
       context: context,
@@ -334,7 +233,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 _createFolder();
               },
             ),
-            // Only show glossary option when inside a folder
             if (_currentFolder != null)
               ListTile(
                 leading: Icon(Icons.book),
@@ -350,10 +248,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  // Rename item
   void _renameItem(dynamic item) {
     final TextEditingController nameController = TextEditingController(text: item.name);
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -367,35 +264,27 @@ class _LibraryScreenState extends State<LibraryScreen> {
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel')),
           ElevatedButton(
             onPressed: () async {
-              if (nameController.text.trim().isNotEmpty) {
-                setState(() {
-                  item.name = nameController.text.trim();
-                });
-                
-                // Save to Firestore and SharedPreferences
-                try {
-                  if (item is GlossaryItem) {
-                    await _glossaryService.saveGlossary(item);
-                    await _preferencesService.saveGlossary(item);
-                  } else if (item is FolderItem) {
-                    await _glossaryService.saveFolder(item);
-                    await _preferencesService.saveFolder(item);
-                    // Save entire library to ensure consistency
-                    await _saveLibrary();
-                  }
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Failed to save: $e')),
-                  );
+              if (nameController.text.trim().isEmpty) return;
+
+              setState(() => item.name = nameController.text.trim());
+              Navigator.pop(context);
+
+              // Persist rename immediately
+              try {
+                if (item is FolderItem) {
+                  debugPrint('[LIB] renameItem: saving folder ${item.id}');
+                  await _glossaryService.saveFolder(item);
+                } else if (item is GlossaryItem) {
+                  debugPrint('[LIB] renameItem: saving glossary ${item.id}');
+                  await _glossaryService.saveGlossary(item);
                 }
-                
-                Navigator.pop(context);
+                debugPrint('[LIB] renameItem: saved ${item.id}');
+              } catch (e) {
+                debugPrint('[LIB] renameItem FAILED: $e');
+                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
               }
             },
             child: Text('Save'),
@@ -405,129 +294,86 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  // Toggle checkbox
   void _toggleCheckbox(dynamic item, bool newValue) {
-    setState(() {
-      item.isChecked = newValue;
-    });
+    setState(() => item.isChecked = newValue);
+    // Immediately persist checkbox change
+    if (item is FolderItem) {
+      _glossaryService.saveFolder(item).catchError((e) => debugPrint('[LIB] toggleCheckbox saveFolder FAILED: $e'));
+    } else if (item is GlossaryItem) {
+      _glossaryService.saveGlossary(item).catchError((e) => debugPrint('[LIB] toggleCheckbox saveGlossary FAILED: $e'));
+    }
   }
 
-  // Handle item tap
-  void _handleItemTap(dynamic item) {
+  Future<void> _handleItemTap(dynamic item) async {
     if (item is FolderItem) {
-      // Navigate into folder
       _navigateToFolder(item);
     } else if (item is GlossaryItem) {
-      // Navigate to GlossaryScreen
-      Navigator.push(
+      // Pass the glossary to GlossaryScreen; GlossaryScreen will perform entry saves itself.
+      final updated = await Navigator.push(
         context,
-        MaterialPageRoute(
-          builder: (context) => GlossaryScreen(glossaryItem: item),
-        ),
+        MaterialPageRoute(builder: (_) => GlossaryScreen(glossaryItem: item)),
       );
+
+      if (updated != null && updated is GlossaryItem) {
+        setState(() {
+          final idx = _currentItems.indexWhere((c) => (c is GlossaryItem) && c.id == updated.id);
+          if (idx != -1) _currentItems[idx] = updated;
+        });
+      }
     }
   }
 
-  // Build breadcrumb
-  String _buildBreadcrumb() {
-    if (_folderStack.isEmpty) {
-      return 'Library';
-    }
-    return _folderStack.map((f) => f.name).join(' / ');
-  }
+  String _buildBreadcrumb() => _folderStack.isEmpty ? 'Library' : _folderStack.map((f) => f.name).join(' / ');
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[300],
       appBar: AppBar(
-        title: Text(
-          _buildBreadcrumb(),
-          style: TextStyle(
-            color: Colors.black,
-            fontWeight: FontWeight.bold,
-            fontSize: 20,
-          ),
-        ),
+        title: Text(_buildBreadcrumb(), style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 20)),
         backgroundColor: Colors.transparent,
         elevation: 0,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: _navigateBack,
-        ),
+        leading: IconButton(icon: Icon(Icons.arrow_back, color: Colors.black), onPressed: _navigateBack),
       ),
       body: _isLoading
           ? Center(child: CircularProgressIndicator())
-          : Column(
-        children: [
-          // Cards section - show folders and glossaries
-          if (_currentItems.isNotEmpty)
-            Expanded(
-              child: GridView.builder(
-                padding: EdgeInsets.all(16),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 16,
-                  childAspectRatio: 1.2,
-                ),
-                itemCount: _currentItems.length,
-                itemBuilder: (context, index) {
-                  final item = _currentItems[index];
-                  return LibraryItemCard(
-                    item: item,
-                    onTap: () => _handleItemTap(item),
-                    onRename: () => _renameItem(item),
-                    onCheckboxChanged: (value) => _toggleCheckbox(item, value),
-                  );
-                },
-              ),
-            )
-          else
-            Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.folder_open,
-                      size: 64,
-                      color: Colors.grey[600],
-                    ),
-                    SizedBox(height: 16),
-                    Text(
-                      _currentFolder == null
-                          ? 'No folders yet'
-                          : 'No Subfolders or glossary yet',
-                      style: TextStyle(
-                        fontSize: 18,
-                        color: Colors.grey[600],
+          : _currentItems.isNotEmpty
+              ? GridView.builder(
+                  padding: EdgeInsets.all(16),
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                    childAspectRatio: 1.2,
+                  ),
+                  itemCount: _currentItems.length,
+                  itemBuilder: (context, index) {
+                    final item = _currentItems[index];
+                    return LibraryItemCard(
+                      item: item,
+                      onTap: () => _handleItemTap(item),
+                      onRename: () => _renameItem(item),
+                      onCheckboxChanged: (value) => _toggleCheckbox(item, value),
+                    );
+                  },
+                )
+              : Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.folder_open, size: 64, color: Colors.grey[600]),
+                      SizedBox(height: 16),
+                      Text(
+                        _currentFolder == null ? 'No folders yet' : 'No subfolders or glossaries yet',
+                        style: TextStyle(fontSize: 18, color: Colors.grey[600]),
                       ),
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      'Tap the + button to create',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey[500],
-                      ),
-                    ),
-                  ],
+                      SizedBox(height: 8),
+                      Text('Tap the + button to create', style: TextStyle(fontSize: 14, color: Colors.grey[500])),
+                    ],
+                  ),
                 ),
-              ),
-            ),
-        ],
-      ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          if (_currentFolder == null) {
-            // At root: go straight to folder creation
-            _createFolder();
-          } else {
-            // Inside folder: show dialog to choose between subfolder or glossary
-            _showCreateDialog();
-          }
-        },
+        onPressed: _currentFolder == null ? _createFolder : _showCreateDialog,
         backgroundColor: Colors.green,
         foregroundColor: Colors.white,
         child: Icon(Icons.add),
