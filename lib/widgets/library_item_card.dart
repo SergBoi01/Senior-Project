@@ -5,6 +5,7 @@ class LibraryItemCard extends StatelessWidget {
   final dynamic item; // Can be FolderItem or GlossaryItem
   final VoidCallback onTap;
   final VoidCallback? onRename;
+  final VoidCallback? onDelete;
   final Function(bool)? onCheckboxChanged;
 
   const LibraryItemCard({
@@ -12,6 +13,7 @@ class LibraryItemCard extends StatelessWidget {
     required this.item,
     required this.onTap,
     this.onRename,
+    this.onDelete,
     this.onCheckboxChanged,
   }) : super(key: key);
 
@@ -19,15 +21,196 @@ class LibraryItemCard extends StatelessWidget {
   bool get isChecked => item.isChecked;
   String get name => item.name;
 
+  // Show action popup when checkbox is tapped
+  void _showActionPopup(BuildContext context) {
+    // Determine item type text
+    String itemTypeText;
+    if (item is FolderItem) {
+      itemTypeText = (item as FolderItem).parentId != null ? 'Subfolder' : 'Folder';
+    } else {
+      itemTypeText = 'Glossary';
+    }
+    
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Header with item info
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: isFolder 
+                            ? Colors.amber.withOpacity(0.2) 
+                            : Colors.blue.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(
+                        isFolder ? Icons.folder : Icons.book,
+                        color: isFolder ? Colors.amber[700] : Colors.blue[700],
+                        size: 24,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            name,
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey[800],
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            itemTypeText,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              
+              // Action buttons
+              _buildActionButton(
+                context,
+                icon: Icons.edit_outlined,
+                label: 'Rename',
+                color: Colors.grey[700]!,
+                onTap: () {
+                  Navigator.pop(context);
+                  // Uncheck the item
+                  if (onCheckboxChanged != null) {
+                    onCheckboxChanged!(false);
+                  }
+                  if (onRename != null) onRename!();
+                },
+              ),
+              const SizedBox(height: 10),
+              _buildActionButton(
+                context,
+                icon: Icons.delete_outline,
+                label: 'Delete',
+                color: Colors.red[400]!,
+                onTap: () {
+                  Navigator.pop(context);
+                  // Uncheck the item
+                  if (onCheckboxChanged != null) {
+                    onCheckboxChanged!(false);
+                  }
+                  if (onDelete != null) onDelete!();
+                },
+              ),
+              const SizedBox(height: 16),
+              
+              // Cancel button
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () {
+                    // Uncheck the item when cancelling
+                    if (onCheckboxChanged != null) {
+                      onCheckboxChanged!(false);
+                    }
+                    Navigator.pop(context);
+                  },
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: BorderSide(color: Colors.grey.shade300),
+                    ),
+                  ),
+                  child: Text(
+                    'Cancel',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActionButton(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade200),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: color, size: 22),
+              const SizedBox(width: 14),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                  color: color,
+                ),
+              ),
+              const Spacer(),
+              Icon(Icons.chevron_right, color: Colors.grey[400], size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Card always stays white, only checkbox changes
-    Color cardColor = Colors.white;
+    // Card color changes based on checkbox state
+    Color cardColor = isChecked ? Colors.green : Colors.white;
     Color textColor = Colors.black;
 
     return GestureDetector(
       onTap: onTap,
-      onLongPress: onRename,
       child: Container(
         decoration: BoxDecoration(
           color: cardColor,
@@ -94,11 +277,20 @@ class LibraryItemCard extends StatelessWidget {
                     ),
                   ),
                   SizedBox(width: 8),
-                  // Checkbox (right side) - only this changes color
+                  // Checkbox - tapping shows action popup when checking
                   GestureDetector(
                     onTap: () {
-                      if (onCheckboxChanged != null) {
-                        onCheckboxChanged!(!isChecked);
+                      if (!isChecked) {
+                        // If not checked, check it and show popup
+                        if (onCheckboxChanged != null) {
+                          onCheckboxChanged!(true);
+                        }
+                        _showActionPopup(context);
+                      } else {
+                        // If already checked, just uncheck it
+                        if (onCheckboxChanged != null) {
+                          onCheckboxChanged!(false);
+                        }
                       }
                     },
                     child: Container(
@@ -130,4 +322,3 @@ class LibraryItemCard extends StatelessWidget {
     );
   }
 }
-

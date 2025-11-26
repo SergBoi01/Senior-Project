@@ -211,6 +211,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
         return;
       }
 
+      // Check file size (limit to 5MB for performance)
+      const int maxFileSizeBytes = 5 * 1024 * 1024; // 5MB
+      if (file.bytes!.length > maxFileSizeBytes) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('File is too large. Maximum size is 5MB'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
       // Parse CSV
       String csvString = utf8.decode(file.bytes!);
       List<List<dynamic>> csvData = const CsvToListConverter().convert(csvString);
@@ -310,10 +322,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
   void _renameItem(dynamic item) {
     final TextEditingController nameController = TextEditingController(text: item.name);
     
+    // Determine item type
+    String itemType;
+    if (item is FolderItem) {
+      itemType = item.parentId != null ? "Subfolder" : "Folder";
+    } else {
+      itemType = "Glossary";
+    }
+    
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Rename ${item is FolderItem ? "Folder" : "Glossary"}'),
+        title: Text('Rename $itemType'),
         content: TextField(
           controller: nameController,
           autofocus: true,
@@ -339,6 +359,151 @@ class _LibraryScreenState extends State<LibraryScreen> {
             child: Text('Save'),
           ),
         ],
+      ),
+    );
+  }
+
+  // Delete item
+  void _deleteItem(dynamic item) {
+    final String itemName = item.name;
+    
+    // Determine item type
+    String itemType;
+    if (item is FolderItem) {
+      itemType = item.parentId != null ? "Subfolder" : "Folder";
+    } else {
+      itemType = "Glossary";
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Warning icon
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.delete_forever,
+                  color: Colors.red[400],
+                  size: 40,
+                ),
+              ),
+              const SizedBox(height: 20),
+              
+              // Title
+              Text(
+                'Delete $itemType?',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey[800],
+                ),
+              ),
+              const SizedBox(height: 12),
+              
+              // Message
+              Text(
+                'You are about to delete "$itemName" and all of its children, are you sure?',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey[600],
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 24),
+              
+              // Buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(color: Colors.grey.shade300),
+                        ),
+                      ),
+                      child: Text(
+                        'Cancel',
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _performDelete(item);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red[400],
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Delete',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Actually perform the deletion
+  void _performDelete(dynamic item) {
+    setState(() {
+      if (_currentFolder == null) {
+        // At root level - remove from root folders
+        _rootFolders.removeWhere((folder) => folder.id == item.id);
+      } else {
+        // Inside a folder - remove from current folder's children
+        _currentFolder!.children.removeWhere((child) => child.id == item.id);
+      }
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.check_circle_outline, color: Colors.white, size: 20),
+            SizedBox(width: 12),
+            Text('${item.name} deleted'),
+          ],
+        ),
+        backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(16),
       ),
     );
   }
@@ -414,6 +579,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     item: item,
                     onTap: () => _handleItemTap(item),
                     onRename: () => _renameItem(item),
+                    onDelete: () => _deleteItem(item),
                     onCheckboxChanged: (value) => _toggleCheckbox(item, value),
                   );
                 },
