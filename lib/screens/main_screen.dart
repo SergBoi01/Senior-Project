@@ -284,7 +284,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     print('Best match: $bestMatchEnglish → $bestMatchSpanish (score: ${bestScore.toStringAsFixed(3)})');
     print('Returning: ${showSpanish ? "Spanish" : "English"} → $bestMatch');
 
-    return bestScore > 0.4 ? bestMatch : "??";
+    return bestScore > 0.6 ? bestMatch : "??";
   }
 
   // ==================== NORMALIZATION ====================

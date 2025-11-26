@@ -1,7 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import 'dart:typed_data';
 import '../models/library_models.dart';
+import '../models/notebook_models.dart';
 import '../models/strokes_models.dart';
 import '../models/detection_settings_models.dart';
 
@@ -14,6 +14,7 @@ class PreferencesService {
   static const String _keyPenWidth = 'pen_width_';
   static const String _keyGlossaryEntries = 'glossary_entries_';
   static const String _keyLastSyncTime = 'last_sync_time_';
+  static const String _keyNotebookPages = 'notebook_pages_';
 
   Future<SharedPreferences> get _prefs async => await SharedPreferences.getInstance();
 
@@ -90,7 +91,7 @@ class PreferencesService {
       rethrow;
     }
   }
-
+  
   // ==================== LIBRARY STRUCTURE (FOLDERS) ====================
   
   Future<List<FolderItem>> loadRootFolders(String userId) async {
