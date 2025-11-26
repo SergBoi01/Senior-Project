@@ -22,16 +22,14 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   late GlossaryItem glossaryItem;
   int? editingIndex;
   bool showCanvas = false;
-  
-  // Loading and error states - SEPARATED
+
+  // Loading state
   bool _isLoading = false;
-  Set<int> _savingIndices = {}; // Track which entries are being saved
-  Set<int> _deletingIndices = {}; // Track which entries are being deleted
-  String? _errorMessage;
-  
+  bool _hasUnsavedChanges = false;
+
   // Firestore service
   final GlossaryService _glossaryService = GlossaryService();
-  
+
   // Canvas/Drawing controllers
   final GlobalKey _canvasKey = GlobalKey();
   final ScrollController _scrollController = ScrollController();
@@ -45,106 +43,39 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.glossaryItem != null) {
-      glossaryItem = widget.glossaryItem!;
-      _loadEntries();
-    } else {
-      glossaryItem = GlossaryItem(
-        id: 'temp',
-        name: 'Glossary',
+    glossaryItem = widget.glossaryItem ??
+        GlossaryItem(id: 'temp', name: 'Glossary');
+    if (widget.glossaryItem != null) _loadEntries();
+  }
+
+  Future<void> _loadEntries() async {
+    setState(() => _isLoading = true);
+    try {
+      final entries = await _glossaryService.loadEntries(glossaryItem.id);
+      if (mounted) {
+        setState(() {
+          glossaryItem.entries = entries;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to load entries: $e')),
       );
     }
   }
 
-  /// Load entries from Firestore
-  Future<void> _loadEntries() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final entries = await _glossaryService.loadEntries(glossaryItem.id);
-      setState(() {
-        glossaryItem.entries = entries;
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Failed to load entries: $e';
-        _isLoading = false;
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_errorMessage!)),
-        );
-      }
-    }
-  }
-
-  /// Save entry to Firestore - NON-BLOCKING
-  Future<void> _saveEntryToFirestore(int index) async {
+  // Delete entry (instant UI update, backend saved on top button)
+  void _deleteEntry(int index) {
     if (index < 0 || index >= glossaryItem.entries.length) return;
-
     setState(() {
-      _savingIndices.add(index);
-      _errorMessage = null;
+      glossaryItem.deleteEntry(index);
+      _hasUnsavedChanges = true;
     });
-
-    try {
-      final entry = glossaryItem.entries[index];
-      await _glossaryService.saveEntry(glossaryItem.id, entry, index);
-      if (mounted) {
-        setState(() {
-          _savingIndices.remove(index);
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'Failed to save entry: $e';
-          _savingIndices.remove(index);
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_errorMessage!)),
-        );
-      }
-    }
-  }
-
-  /// Delete entry - INDEPENDENT OPERATION
-  Future<void> _deleteEntry(int index) async {
-    final entry = glossaryItem.entries[index];
-    
-    setState(() {
-      _deletingIndices.add(index);
-    });
-
-    try {
-      if (entry.id != null) {
-        await _glossaryService.deleteEntry(glossaryItem.id, entry.id!);
-      }
-      
-      if (mounted) {
-        setState(() {
-          glossaryItem.deleteEntry(index);
-          _deletingIndices.remove(index);
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _deletingIndices.remove(index);
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to delete entry: $e')),
-        );
-      }
-    }
   }
 
   // Canvas/Symbol Methods
-  
   Future<Uint8List?> _captureCanvas() async {
     try {
       RenderRepaintBoundary boundary =
@@ -160,35 +91,26 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
 
   void _saveSymbol() async {
     Uint8List? imageData = await _captureCanvas();
-    
+
     if (editingIndex != null && imageData != null) {
       final index = editingIndex!;
-      
       setState(() {
         glossaryItem.entries[index].symbolImage = imageData;
         glossaryItem.entries[index].strokes = List.from(_currentStrokes);
         showCanvas = false;
         editingIndex = null;
+        _currentStrokes.clear();
+        _currentStrokePoints.clear();
+        _currentStrokeStartTime = null;
+        _hasUnsavedChanges = true;
       });
-      
-      print('Saved symbol with ${_currentStrokes.length} strokes');
-      
-      // Clear everything
-      _currentStrokes.clear();
-      _currentStrokePoints.clear();
-      _currentStrokeStartTime = null;
-      
-      // Save to Firestore in background
-      _saveEntryToFirestore(index);
     }
   }
 
   // Cell Interaction Methods
-  
   void _onCellTap(int rowIndex, int columnIndex) {
     if (columnIndex == 4) {
       final entry = glossaryItem.entries[rowIndex];
-      
       if (entry.symbolImage != null) {
         showDialog(
           context: context,
@@ -221,26 +143,18 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.black,
-                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                ),
-                child: Text('Cancel', style: TextStyle(fontSize: 15)),
+                child: Text('Cancel'),
               ),
               TextButton(
                 onPressed: () {
                   setState(() {
                     entry.symbolImage = null;
                     entry.strokes = null;
+                    _hasUnsavedChanges = true;
                   });
                   Navigator.pop(context);
-                  _saveEntryToFirestore(rowIndex);
                 },
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.red,
-                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                ),
-                child: Text('Delete Symbol', style: TextStyle(fontSize: 15)),
+                child: Text('Delete Symbol', style: TextStyle(color: Colors.red)),
               ),
               ElevatedButton(
                 onPressed: () {
@@ -253,9 +167,8 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.white,
                   foregroundColor: Colors.black,
-                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                 ),
-                child: Text('Replace Drawing', style: TextStyle(fontSize: 15)),
+                child: Text('Replace Drawing'),
               ),
             ],
           ),
@@ -268,7 +181,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
       }
     } else {
       String currentValue = '';
-      
       switch (columnIndex) {
         case 0:
           currentValue = glossaryItem.entries[rowIndex].english;
@@ -283,54 +195,17 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
           currentValue = glossaryItem.entries[rowIndex].synonym;
           break;
       }
-      
+
       _editController.text = currentValue;
-      
+
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
-          backgroundColor: Colors.white,
-          title: Text(
-            ['English', 'Spanish', 'Definition', 'Synonym'][columnIndex],
-            style: TextStyle(color: Colors.black),
-          ),
-          content: StatefulBuilder(
-            builder: (BuildContext context, StateSetter setDialogState) {
-              return TextField(
-                controller: _editController,
-                autofocus: true,
-                style: TextStyle(color: Colors.black),
-                onChanged: (value) {
-                  setDialogState(() {});
-                },
-                decoration: InputDecoration(
-                  border: OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.black),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.black),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.black, width: 2),
-                  ),
-                  suffixIcon: _editController.text.isNotEmpty
-                      ? IconButton(
-                          icon: Icon(Icons.clear, color: Colors.grey),
-                          onPressed: () {
-                            setDialogState(() {
-                              _editController.clear();
-                            });
-                          },
-                        )
-                      : null,
-                ),
-              );
-            },
-          ),
+          title: Text(['English', 'Spanish', 'Definition', 'Synonym'][columnIndex]),
+          content: TextField(controller: _editController),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              style: TextButton.styleFrom(foregroundColor: Colors.black),
               child: Text('Cancel'),
             ),
             ElevatedButton(
@@ -350,14 +225,10 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                       glossaryItem.entries[rowIndex].synonym = _editController.text;
                       break;
                   }
+                  _hasUnsavedChanges = true;
                 });
                 Navigator.pop(context);
-                _saveEntryToFirestore(rowIndex);
               },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: Colors.black,
-              ),
               child: Text('Save'),
             ),
           ],
@@ -366,8 +237,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     }
   }
 
-  // Entry Management Methods
-  
+  // Add new entry
   void _addNewEntry() {
     final newEntry = GlossaryEntry(
       english: '',
@@ -375,13 +245,11 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
       definition: '',
       synonym: '',
     );
-    
+
     setState(() {
       glossaryItem.addEntry(newEntry);
+      _hasUnsavedChanges = true;
     });
-    
-    final index = glossaryItem.entries.length - 1;
-    _saveEntryToFirestore(index);
 
     Future.delayed(Duration(milliseconds: 100), () {
       if (_scrollController.hasClients) {
@@ -394,39 +262,89 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     });
   }
 
-  // Build Methods
-  
+  // Save all entries to Firestore
+  Future<void> _saveAllGlossaryEntries() async {
+    if (!_hasUnsavedChanges) return;
+
+    setState(() => _isLoading = true);
+    try {
+      await _glossaryService.saveAllEntries(glossaryItem.id, glossaryItem.entries);
+      setState(() {
+        _isLoading = false;
+        _hasUnsavedChanges = false;
+      });
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Glossary saved successfully')));
+    } catch (e) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Failed to save glossary: $e')));
+    }
+  }
+
+  // Build UI
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(glossaryItem.name),
-        backgroundColor: Colors.grey[800],
-        iconTheme: IconThemeData(color: Colors.white),
-        actions: [
-          // Show indicator if ANY entry is being saved
-          if (_savingIndices.isNotEmpty)
-            Padding(
-              padding: EdgeInsets.all(16.0),
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+    return WillPopScope(
+      onWillPop: () async {
+        if (_hasUnsavedChanges) {
+          final discard = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: Text('Unsaved Changes'),
+              content: Text('You have unsaved changes. Save before leaving?'),
+              actions: [
+                TextButton(
+                  child: Text('Discard'),
+                  onPressed: () => Navigator.of(context).pop(true),
                 ),
-              ),
+                TextButton(
+                  child: Text('Cancel'),
+                  onPressed: () => Navigator.of(context).pop(false),
+                ),
+                ElevatedButton(
+                  child: Text('Save'),
+                  onPressed: () async {
+                    await _saveAllGlossaryEntries();
+                    Navigator.of(context).pop(true);
+                  },
+                ),
+              ],
             ),
-        ],
+          );
+          return discard ?? false;
+        }
+        return true;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(glossaryItem.name),
+          backgroundColor: Colors.grey[800],
+          actions: [
+            IconButton(
+              icon: Icon(Icons.save),
+              onPressed: _saveAllGlossaryEntries,
+            ),
+          ],
+        ),
+        body: _isLoading
+            ? Center(child: CircularProgressIndicator())
+            : showCanvas
+                ? _buildCanvasView()
+                : _buildTableView(),
+        floatingActionButton: !_isLoading && !showCanvas
+            ? FloatingActionButton(
+                onPressed: _addNewEntry,
+                backgroundColor: Colors.black,
+                foregroundColor: Colors.white,
+                child: Icon(Icons.add),
+              )
+            : null,
       ),
-      body: _isLoading
-          ? Center(child: CircularProgressIndicator())
-          : showCanvas
-              ? _buildCanvasView()
-              : _buildTableView(),
     );
   }
 
+  // Updated _buildTableView row to include delete button
   Widget _buildTableView() {
     return Column(
       children: [
@@ -439,19 +357,16 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
               _buildHeaderCell('Definition', flex: 3),
               _buildHeaderCell('Synonym', flex: 2),
               _buildHeaderCell('Symbol', flex: 1),
-              SizedBox(width: 48),
+              _buildHeaderCell('Delete', flex: 1),
             ],
           ),
         ),
-        
         Expanded(
           child: ListView.builder(
             controller: _scrollController,
             itemCount: glossaryItem.entries.length,
             itemBuilder: (context, index) {
               final entry = glossaryItem.entries[index];
-              final isDeleting = _deletingIndices.contains(index);
-              
               return Container(
                 decoration: BoxDecoration(
                   border: Border(bottom: BorderSide(color: Colors.grey[400]!)),
@@ -464,45 +379,24 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                     _buildDataCell(entry.definition, index, 2, flex: 3),
                     _buildDataCell(entry.synonym, index, 3, flex: 2),
                     _buildSymbolCell(entry, index, flex: 1),
-                    // Delete button - shows loading only for this row
-                    isDeleting
-                        ? Padding(
-                            padding: EdgeInsets.all(12.0),
-                            child: SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
-                              ),
-                            ),
-                          )
-                        : IconButton(
-                            icon: Icon(Icons.delete, color: Colors.red),
-                            onPressed: () => _deleteEntry(index),
-                          ),
+                    Expanded(
+                      flex: 1,
+                      child: IconButton(
+                        icon: Icon(Icons.delete, color: Colors.red),
+                        onPressed: () => _deleteEntry(index),
+                      ),
+                    ),
                   ],
                 ),
               );
             },
           ),
         ),
-        
-        // Add Button - ALWAYS ENABLED
-        Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: FloatingActionButton(
-            onPressed: _addNewEntry,
-            backgroundColor: Colors.black,
-            foregroundColor: Colors.white,
-            tooltip: 'Add new entry',
-            child: Icon(Icons.add),
-          ),
-        ),
       ],
     );
   }
 
+ 
   Widget _buildHeaderCell(String title, {int flex = 1}) {
     return Expanded(
       flex: flex,
@@ -581,9 +475,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
               IconButton(
                 icon: Icon(Icons.undo),
                 onPressed: () {
-                  if (_currentStrokes.isNotEmpty) {
-                    setState(() => _currentStrokes.removeLast());
-                  }
+                  if (_currentStrokes.isNotEmpty) setState(() => _currentStrokes.removeLast());
                 },
               ),
               IconButton(
@@ -613,13 +505,10 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                 });
               },
               onPanUpdate: (details) {
-                setState(() {
-                  _currentStrokePoints.add(details.localPosition);
-                });
+                setState(() => _currentStrokePoints.add(details.localPosition));
               },
               onPanEnd: (details) {
-                if (_currentStrokePoints.isNotEmpty &&
-                    _currentStrokeStartTime != null) {
+                if (_currentStrokePoints.isNotEmpty && _currentStrokeStartTime != null) {
                   setState(() {
                     _currentStrokes.add(
                       Stroke(
@@ -628,7 +517,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                         endTime: DateTime.now(),
                       ),
                     );
-                    _currentStrokePoints = [];
+                    _currentStrokePoints.clear();
                     _currentStrokeStartTime = null;
                   });
                 }
@@ -642,7 +531,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                       currentStroke: _currentStrokePoints,
                     ),
                   ),
-                )
+                ),
               ),
             ),
           ),

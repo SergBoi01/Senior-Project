@@ -1,409 +1,233 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:flutter/foundation.dart';
-
 import '../models/library_models.dart';
-import '../models/strokes_models.dart';
 
-
-/// Service class for managing glossary data in Firestore
 class GlossaryService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseStorage _storage = FirebaseStorage.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  /// Get current user ID
-  String? get _userId => _auth.currentUser?.uid;
-
-  /// Get the path to user's glossaries in Firestore
-  String _getGlossaryPath(String glossaryId) {
-    if (_userId == null) throw Exception('User not logged in');
-    return 'users/$_userId/glossaries/$glossaryId';
+  String get _userId {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) throw Exception('User not logged in');
+    return uid;
   }
 
-  /// Get the path to entries collection
-  String _getEntriesPath(String glossaryId) {
-    return '${_getGlossaryPath(glossaryId)}/entries';
-  }
+  // COLLECTION PATH HELPERS
+  CollectionReference<Map<String, dynamic>> _foldersRef() =>
+      _firestore.collection('users').doc(_userId).collection('folders');
 
-  /// Get the path to symbol image in Storage
-  String _getSymbolPath(String glossaryId, String entryId) {
-    if (_userId == null) throw Exception('User not logged in');
-    return 'users/$_userId/glossaries/$glossaryId/entries/$entryId/symbol.png';
-  }
+  CollectionReference<Map<String, dynamic>> _glossariesRef() =>
+      _firestore.collection('users').doc(_userId).collection('glossaries');
 
-  /// Save a glossary entry to Firestore
-  Future<void> saveEntry(String glossaryId, GlossaryEntry entry, int index) async {
-    if (_userId == null) throw Exception('User not logged in');
-    
-    try {
-      // Generate entry ID if it doesn't exist (for new entries)
-      String entryId = entry.id ?? 'entry_${DateTime.now().millisecondsSinceEpoch}_$index';
-      
-      // Upload symbol image to Storage if it exists
-      String? symbolImageUrl;
-      if (entry.symbolImage != null) {
-        symbolImageUrl = await _uploadSymbolImage(glossaryId, entryId, entry.symbolImage!);
-      } else {
-        // If symbol was deleted, remove from Storage
-        await _deleteSymbolImage(glossaryId, entryId);
-      }
+  CollectionReference<Map<String, dynamic>> _entriesRef(String glossaryId) =>
+      _glossariesRef().doc(glossaryId).collection('entries');
 
-      // Serialize strokes to JSON
-      List<Map<String, dynamic>>? strokesJson;
-      if (entry.strokes != null && entry.strokes!.isNotEmpty) {
-        strokesJson = entry.strokes!.map((stroke) => stroke.toJson()).toList();
-      }
+  // -------------------------
+  // FOLDERS / GLOSSARIES (real-time writes)
+  // -------------------------
 
-      // Save entry data to Firestore
-      await _firestore
-          .collection(_getEntriesPath(glossaryId))
-          .doc(entryId)
-          .set({
-        'english': entry.english,
-        'spanish': entry.spanish,
-        'definition': entry.definition,
-        'synonym': entry.synonym,
-        'symbolImageUrl': symbolImageUrl,
-        'strokes': strokesJson, // Save strokes data
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-
-      // Update entry ID in the model
-      entry.id = entryId;
-    } catch (e) {
-      throw Exception('Failed to save entry: $e');
-    }
-  }
-
-  /// Load all entries for a glossary from Firestore
-  Future<List<GlossaryEntry>> loadEntries(String glossaryId) async {
-    if (_userId == null) throw Exception('User not logged in');
-    
-    try {
-      QuerySnapshot querySnapshot;
-      try {
-        // Try to order by updatedAt first
-        querySnapshot = await _firestore
-            .collection(_getEntriesPath(glossaryId))
-            .orderBy('updatedAt', descending: true)
-            .get();
-      } catch (e) {
-        // If ordering fails (e.g., no index or no updatedAt field), just get all entries
-        querySnapshot = await _firestore
-            .collection(_getEntriesPath(glossaryId))
-            .get();
-      }
-
-      List<GlossaryEntry> entries = [];
-      
-      for (var doc in querySnapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>?;
-        if (data == null) continue;
-        
-        // Download symbol image if URL exists
-        Uint8List? symbolImage;
-        if (data['symbolImageUrl'] != null && data['symbolImageUrl'] is String) {
-          try {
-            symbolImage = await _downloadSymbolImage(data['symbolImageUrl'] as String);
-          } catch (e) {
-            debugPrint('Failed to download symbol image: $e');
-          }
-        }
-
-        // Deserialize strokes from JSON
-        List<Stroke>? strokes;
-        if (data['strokes'] != null && data['strokes'] is List) {
-          try {
-            strokes = (data['strokes'] as List)
-                .map((strokeJson) => Stroke.fromJson(strokeJson as Map<String, dynamic>))
-                .toList();
-          } catch (e) {
-            debugPrint('Failed to deserialize strokes: $e');
-          }
-        }
-
-        entries.add(GlossaryEntry(
-          id: doc.id,
-          english: data['english'] ?? '',
-          spanish: data['spanish'] ?? '',
-          definition: data['definition'] ?? '',
-          synonym: data['synonym'] ?? '',
-          symbolImage: symbolImage,
-          strokes: strokes,
-        ));
-      }
-
-      return entries;
-    } catch (e) {
-      throw Exception('Failed to load entries: $e');
-    }
-  }
-
-  /// Delete an entry from Firestore
-  Future<void> deleteEntry(String glossaryId, String entryId) async {
-    if (_userId == null) throw Exception('User not logged in');
-    
-    try {
-      // Delete entry document
-      await _firestore
-          .collection(_getEntriesPath(glossaryId))
-          .doc(entryId)
-          .delete();
-
-      // Delete symbol image from Storage
-      await _deleteSymbolImage(glossaryId, entryId);
-    } catch (e) {
-      throw Exception('Failed to delete entry: $e');
-    }
-  }
-
-  /// Upload symbol image to Firebase Storage
-  Future<String> _uploadSymbolImage(String glossaryId, String entryId, Uint8List imageData) async {
-    try {
-      final ref = _storage.ref().child(_getSymbolPath(glossaryId, entryId));
-      await ref.putData(imageData, SettableMetadata(contentType: 'image/png'));
-      return await ref.getDownloadURL();
-    } catch (e) {
-      throw Exception('Failed to upload symbol image: $e');
-    }
-  }
-
-  /// Download symbol image from Firebase Storage
-  Future<Uint8List> _downloadSymbolImage(String imageUrl) async {
-    try {
-      final ref = _storage.refFromURL(imageUrl);
-      return await ref.getData() ?? Uint8List(0);
-    } catch (e) {
-      throw Exception('Failed to download symbol image: $e');
-    }
-  }
-
-  /// Delete symbol image from Firebase Storage
-  Future<void> _deleteSymbolImage(String glossaryId, String entryId) async {
-    try {
-      final ref = _storage.ref().child(_getSymbolPath(glossaryId, entryId));
-      await ref.delete();
-    } catch (e) {
-      // Ignore error if file doesn't exist
-      debugPrint('Error deleting symbol image (may not exist): $e');
-    }
-  }
-
-  /// Save glossary metadata (name, parentId) to Firestore
-  Future<void> saveGlossary(GlossaryItem glossary) async {
-    if (_userId == null) throw Exception('User not logged in');
-    
-    try {
-      await _firestore
-          .collection('users/$_userId/glossaries')
-          .doc(glossary.id)
-          .set({
-        'name': glossary.name,
-        'parentId': glossary.parentId,
-        'isChecked': glossary.isChecked,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    } catch (e) {
-      throw Exception('Failed to save glossary: $e');
-    }
-  }
-
-  /// Load a glossary from Firestore
-  /// [loadEntries] - if true, loads all entries (default: false for performance)
-  Future<GlossaryItem?> loadGlossary(String glossaryId, {bool loadEntries = false}) async {
-    if (_userId == null) throw Exception('User not logged in');
-    
-    try {
-      final doc = await _firestore
-          .collection('users/$_userId/glossaries')
-          .doc(glossaryId)
-          .get();
-
-      if (!doc.exists) return null;
-
-      final data = doc.data()!;
-      
-      // Only load entries if requested (for performance when loading library structure)
-      List<GlossaryEntry> glossaryEntries = [];
-      if (loadEntries) {
-        glossaryEntries = await this.loadEntries(glossaryId);
-      }
-
-      return GlossaryItem(
-        id: glossaryId,
-        name: data['name'] ?? '',
-        isChecked: data['isChecked'] ?? false,
-        parentId: data['parentId'],
-        entries: glossaryEntries,
-      );
-    } catch (e) {
-      throw Exception('Failed to load glossary: $e');
-    }
-  }
-
-  /// Save a folder to Firestore
+  /// Save (create or update) a folder immediately.
   Future<void> saveFolder(FolderItem folder) async {
-    if (_userId == null) throw Exception('User not logged in');
-    
     try {
-      await _firestore
-          .collection('users/$_userId/folders')
-          .doc(folder.id)
-          .set({
+      final docRef = _foldersRef().doc(folder.id);
+      print('[GS] saveFolder: saving folder id=${folder.id} name="${folder.name}" parent=${folder.parentId}');
+      await docRef.set({
         'name': folder.name,
         'parentId': folder.parentId,
         'isChecked': folder.isChecked,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     } catch (e) {
-      throw Exception('Failed to save folder: $e');
+      print('[GS] saveFolder FAILED: $e');
+      rethrow;
     }
   }
 
-  /// Load a folder from Firestore
-  Future<FolderItem?> loadFolder(String folderId) async {
-    if (_userId == null) throw Exception('User not logged in');
-    
+  /// Delete folder (will not cascade children automatically here).
+  Future<void> deleteFolder(String folderId) async {
     try {
-      final doc = await _firestore
-          .collection('users/$_userId/folders')
-          .doc(folderId)
-          .get();
-
-      if (!doc.exists) return null;
-
-      final data = doc.data()!;
-      
-      // Load children (folders and glossaries)
-      List<dynamic> children = [];
-      
-      // Load subfolders
-      final subfoldersSnapshot = await _firestore
-          .collection('users/$_userId/folders')
-          .where('parentId', isEqualTo: folderId)
-          .get();
-      
-      for (var subfolderDoc in subfoldersSnapshot.docs) {
-        try {
-          final subfolder = await loadFolder(subfolderDoc.id);
-          if (subfolder != null) {
-            children.add(subfolder);
-          }
-        } catch (e) {
-          debugPrint('Error loading subfolder ${subfolderDoc.id}: $e');
-          // Continue loading other folders even if one fails
-        }
-      }
-      
-      // Load glossaries in this folder (without entries for performance)
-      final glossariesSnapshot = await _firestore
-          .collection('users/$_userId/glossaries')
-          .where('parentId', isEqualTo: folderId)
-          .get();
-      
-      for (var glossaryDoc in glossariesSnapshot.docs) {
-        try {
-          // Load glossary without entries for better performance
-          final glossary = await loadGlossary(glossaryDoc.id, loadEntries: false);
-          if (glossary != null) {
-            children.add(glossary);
-          }
-        } catch (e) {
-          debugPrint('Error loading glossary ${glossaryDoc.id}: $e');
-          // Continue loading other glossaries even if one fails
-        }
-      }
-
-      return FolderItem(
-        id: folderId,
-        name: data['name'] ?? '',
-        isChecked: data['isChecked'] ?? false,
-        parentId: data['parentId'],
-        children: children,
-      );
+      print('[GS] deleteFolder: id=$folderId');
+      await _foldersRef().doc(folderId).delete();
     } catch (e) {
-      throw Exception('Failed to load folder: $e');
+      print('[GS] deleteFolder FAILED: $e');
+      rethrow;
     }
   }
 
-  /// Load all root folders (folders with no parent)
-  Future<List<FolderItem>> loadRootFolders() async {
-    if (_userId == null) throw Exception('User not logged in');
-    
+  /// Save (create or update) a glossary metadata immediately.
+  Future<void> saveGlossary(GlossaryItem glossary) async {
     try {
-      final querySnapshot = await _firestore
-          .collection('users/$_userId/folders')
-          .where('parentId', isNull: true)
-          .get();
+      final docRef = _glossariesRef().doc(glossary.id);
+      print('[GS] saveGlossary: saving glossary id=${glossary.id} name="${glossary.name}" parent=${glossary.parentId}');
+      await docRef.set({
+        'name': glossary.name,
+        'parentId': glossary.parentId,
+        'isChecked': glossary.isChecked,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      print('[GS] saveGlossary FAILED: $e');
+      rethrow;
+    }
+  }
 
-      List<FolderItem> rootFolders = [];
-      
-      for (var doc in querySnapshot.docs) {
-        final folder = await loadFolder(doc.id);
-        if (folder != null) {
-          rootFolders.add(folder);
+  /// Delete glossary (also deletes entries and symbol images if your entry code does that).
+  Future<void> deleteGlossary(String glossaryId) async {
+    try {
+      print('[GS] deleteGlossary: id=$glossaryId');
+      // delete entries first
+      final entries = await _entriesRef(glossaryId).get();
+      for (var d in entries.docs) {
+        await _entriesRef(glossaryId).doc(d.id).delete();
+      }
+      // delete glossary doc
+      await _glossariesRef().doc(glossaryId).delete();
+    } catch (e) {
+      print('[GS] deleteGlossary FAILED: $e');
+      rethrow;
+    }
+  }
+
+  // -------------------------
+  // LIBRARY LOADER (build tree)
+  // -------------------------
+
+  /// Loads folders and glossaries for the user and assembles a tree.
+  /// This returns root-level FolderItems (those with parentId == null), each
+  /// containing child FolderItems and GlossaryItems in their `children` list.
+  Future<List<FolderItem>> loadRootFolders() async {
+    try {
+      print('[GS] loadRootFolders: start for user=$_userId');
+
+      final folderSnap = await _foldersRef().get();
+      final glossarySnap = await _glossariesRef().get();
+
+      // Map id -> FolderItem
+      final Map<String, FolderItem> foldersById = {};
+      for (var doc in folderSnap.docs) {
+        final data = doc.data();
+        final f = FolderItem(
+          id: doc.id,
+          name: data['name'] ?? '',
+          isChecked: data['isChecked'] ?? false,
+          parentId: data['parentId'],
+          children: [],
+        );
+        foldersById[f.id] = f;
+      }
+
+      // Map id -> GlossaryItem
+      final Map<String, GlossaryItem> glossById = {};
+      for (var doc in glossarySnap.docs) {
+        final data = doc.data();
+        final g = GlossaryItem(
+          id: doc.id,
+          name: data['name'] ?? '',
+          isChecked: data['isChecked'] ?? false,
+          parentId: data['parentId'],
+          entries: [], // entries load later when user opens glossary
+        );
+        glossById[g.id] = g;
+      }
+
+      // Attach glossaries to their parent folders (or keep unattached)
+      for (var g in glossById.values) {
+        if (g.parentId != null && foldersById.containsKey(g.parentId)) {
+          foldersById[g.parentId]!.children.add(g);
         }
       }
 
+      // Attach folders as children to parent folders
+      for (var f in foldersById.values) {
+        if (f.parentId != null && foldersById.containsKey(f.parentId)) {
+          foldersById[f.parentId]!.children.add(f);
+        }
+      }
+
+      // Collect root folders (parentId == null)
+      final rootFolders = foldersById.values.where((f) => f.parentId == null).toList();
+
+      // If there are glossaries sitting at root (parentId == null), convert them into a
+      // synthetic root container? For now, attach glossaries with parentId==null to a single root folder list
+      final rootGlossaries = glossById.values.where((g) => g.parentId == null).toList();
+      if (rootGlossaries.isNotEmpty) {
+        // If there are glossaries at root, create a "Unfiled" folder container OR
+        // return them separately. We'll add an "Unfiled" folder to keep UI consistent.
+        final unfiled = FolderItem(id: '_unfiled', name: 'Unfiled', parentId: null);
+        unfiled.children.addAll(rootGlossaries);
+        rootFolders.add(unfiled);
+      }
+
+      print('[GS] loadRootFolders: loaded ${rootFolders.length} root folders');
       return rootFolders;
     } catch (e) {
-      throw Exception('Failed to load root folders: $e');
+      print('[GS] loadRootFolders FAILED: $e');
+      rethrow;
     }
   }
 
-  /// Delete a folder from Firestore
-  Future<void> deleteFolder(String folderId) async {
-    if (_userId == null) throw Exception('User not logged in');
-    
+  // -------------------------
+  // GLOSSARY ENTRIES (saved by Save button in GlossaryScreen)
+  // -------------------------
+
+  /// Load entries for a glossary
+  Future<List<GlossaryEntry>> loadEntries(String glossaryId) async {
     try {
-      // Load folder to get children
-      final folder = await loadFolder(folderId);
-      if (folder != null) {
-        // Recursively delete all children
-        for (var child in folder.children) {
-          if (child is FolderItem) {
-            await deleteFolder(child.id);
-          } else if (child is GlossaryItem) {
-            // Delete glossary and its entries
-            await _deleteGlossary(child.id);
-          }
-        }
-      }
-      
-      // Delete the folder itself
-      await _firestore
-          .collection('users/$_userId/folders')
-          .doc(folderId)
-          .delete();
+      final snapshot = await _entriesRef(glossaryId).orderBy('updatedAt', descending: true).get();
+
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+        return GlossaryEntry(
+          id: doc.id,
+          english: data['english'] ?? '',
+          spanish: data['spanish'] ?? '',
+          definition: data['definition'] ?? '',
+          synonym: data['synonym'] ?? '',
+          // symbolImage & strokes are intentionally not hydrated here (large blobs)
+        );
+      }).toList();
     } catch (e) {
-      throw Exception('Failed to delete folder: $e');
+      print('[GS] loadEntries FAILED: $e');
+      rethrow;
     }
   }
 
-  /// Delete a glossary and all its entries
-  Future<void> _deleteGlossary(String glossaryId) async {
-    if (_userId == null) throw Exception('User not logged in');
-    
+  /// Save all entries for a glossary (called when user clicks Save in GlossaryScreen)
+  Future<void> saveAllEntries(String glossaryId, List<GlossaryEntry> entries) async {
     try {
-      // Delete all entries
-      final entriesSnapshot = await _firestore
-          .collection('users/$_userId/glossaries/$glossaryId/entries')
-          .get();
-      
-      for (var entryDoc in entriesSnapshot.docs) {
-        await deleteEntry(glossaryId, entryDoc.id);
+      final batch = _firestore.batch();
+      final entriesRef = _entriesRef(glossaryId);
+
+      for (var entry in entries) {
+        final docRef = entry.id != null ? entriesRef.doc(entry.id) : entriesRef.doc();
+        entry.id ??= docRef.id;
+
+        final data = {
+          'english': entry.english,
+          'spanish': entry.spanish,
+          'definition': entry.definition,
+          'synonym': entry.synonym,
+          'updatedAt': FieldValue.serverTimestamp(),
+        };
+
+        batch.set(docRef, data, SetOptions(merge: true));
       }
-      
-      // Delete glossary document
-      await _firestore
-          .collection('users/$_userId/glossaries')
-          .doc(glossaryId)
-          .delete();
+
+      print('[GS] saveAllEntries: committing ${entries.length} entries for glossary=$glossaryId');
+      await batch.commit();
     } catch (e) {
-      throw Exception('Failed to delete glossary: $e');
+      print('[GS] saveAllEntries FAILED: $e');
+      rethrow;
     }
   }
 
+  /// Delete a single entry
+  Future<void> deleteEntry(String glossaryId, String entryId) async {
+    try {
+      await _entriesRef(glossaryId).doc(entryId).delete();
+    } catch (e) {
+      print('[GS] deleteEntry FAILED: $e');
+      rethrow;
+    }
+  }
 }

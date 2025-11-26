@@ -6,6 +6,7 @@ import 'strokes_models.dart';
 import 'detection_settings_models.dart';
 
 import '../services/glossary_service.dart';
+import '../services/drawing_settings.dart';
 
 
 
@@ -22,53 +23,33 @@ class UserDataManager {
   List<UserCorrection> corrections = [];
   List<FolderItem> libraryRootFolders = [];
   DetectionSettings detectionSettings = DetectionSettings();
+  double penWidth = 10.0;
 
   // Flags
   bool isLoaded = false;
 
   /// Load all user data from Firestore
-  Future<void> loadUserData(String userId) async {
-    try {
-      await notebook.loadFromFirestore(userId);
+  Future<void> loadUserData(String userID) async {
+    final doc = await _firestore.collection('users').doc(userID).get();
+    if (!doc.exists) return;
 
-      // Load user corrections
-      final corrDoc = await _firestore
-          .collection('users')
-          .doc(userId)
-          .collection('corrections')
-          .get();
-      corrections = corrDoc.docs
-          .map((d) => UserCorrection.fromJson(d.data()))
-          .toList();
+    final data = doc.data()!;
 
-      // Load library
-      final libraryDoc = await _firestore
-          .collection('users')
-          .doc(userId)
-          .collection('library')
-          .get();
-      libraryRootFolders = libraryDoc.docs
-          .map((d) => FolderItemFirestore.fromJson(d.data()))
-          .toList();
+    corrections = (data['corrections'] as List<dynamic>?)
+            ?.map((e) => UserCorrection.fromJson(e))
+            .toList() ??
+        [];
 
-      // Load detection settings
-      final settingsDoc = await _firestore
-          .collection('users')
-          .doc(userId)
-          .collection('settings')
-          .doc('detection')
-          .get();
-      if (settingsDoc.exists) {
-        detectionSettings = DetectionSettings.fromJson(settingsDoc.data()!);
-      }
+    detectionSettings =
+        DetectionSettings.fromJson(data['detectionSettings'] ?? {});
 
-      isLoaded = true;
-      print('User data loaded from Firestore.');
-    } catch (e) {
-      print('Failed to load user data: $e');
-    }
+    penWidth = (data['penWidth'] ?? 10.0).toDouble();
+
+    // IMPORTANT: hydrate global drawing settings
+    drawingSettings.setPenWidth(penWidth);
   }
-  
+
+
   // Load library structure when needed
   Future<List<FolderItem>> loadLibraryStructure(String userId) async {
     final glossaryService = GlossaryService();
@@ -77,38 +58,14 @@ class UserDataManager {
       
   
   /// Save all user data from Firestore
-  Future<void> saveUserData(String userId) async {
-    try {
-      await notebook.saveToFirestore(userId);
-
-      // Save corrections
-      final batch = _firestore.batch();
-      final corrRef = _firestore.collection('users').doc(userId).collection('corrections');
-      for (var c in corrections) {
-        final docRef = corrRef.doc();
-        batch.set(docRef, c.toJson());
-      }
-      await batch.commit();
-
-      // Save library
-      final libRef = _firestore.collection('users').doc(userId).collection('library');
-      for (var f in libraryRootFolders) {
-        await libRef.doc(f.id).set(f.toJson());
-      }
-
-      // Save detection settings
-      await _firestore
-          .collection('users')
-          .doc(userId)
-          .collection('settings')
-          .doc('detection')
-          .set(detectionSettings.toJson());
-
-      print('User data saved to Firestore.');
-    } catch (e) {
-      print('Failed to save user data: $e');
-    }
+  Future<void> saveUserData(String userID) async {
+    await _firestore.collection('users').doc(userID).set({
+      'corrections': corrections.map((e) => e.toJson()).toList(),
+      'detectionSettings': detectionSettings.toJson(),
+      'penWidth': penWidth,
+    }, SetOptions(merge: true));
   }
+
 
 
   /// Recursive save for library folders
