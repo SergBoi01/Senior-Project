@@ -68,25 +68,32 @@ class _LoginScreenState extends State<LoginScreen> {
   void bypassLogin() async {
     setState(() => _isLoading = true);
     
-    // Use a test user ID for bypass
-    const testUserId = 'test_user_bypass';
-    
-    await UserDataManager().loadUserData(testUserId);
-    
-    if (!mounted) return;
-    
-    setState(() => _isLoading = false);
-    
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (_) => MainPage(
-          userID: testUserId,
-          libraryStructure: UserDataManager().libraryRootFolders,
-          userCorrections: UserDataManager().corrections,
-        ),
-      ),
-    );
+    const String email = 'flutterdartguest123@gmail.com';
+    const String password = 'flutterdartguest123';
+
+    try {
+      UserCredential cred = await FirebaseAuth.instance
+          .signInWithEmailAndPassword(email: email, password: password);
+      onLoginSuccess(cred.user!.uid);
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'user-not-found') {
+        try {
+          UserCredential cred = await FirebaseAuth.instance
+              .createUserWithEmailAndPassword(email: email, password: password);
+          onLoginSuccess(cred.user!.uid);
+        } catch (e) {
+          setState(() {
+            errorMessage = 'Bypass login failed. Please try again.';
+            _isLoading = false;
+          });
+        }
+      } else {
+        setState(() {
+          errorMessage = 'Bypass login failed. Please try again.';
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   @override
