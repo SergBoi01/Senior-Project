@@ -1,6 +1,9 @@
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/library_models.dart';
+import '../models/strokes_models.dart';
 
 class GlossaryService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -177,13 +180,29 @@ class GlossaryService {
 
       return snapshot.docs.map((doc) {
         final data = doc.data();
+        
+        // Hydrate strokes
+        List<Stroke>? strokes;
+        if (data['strokes'] != null) {
+          strokes = (data['strokes'] as List)
+              .map((s) => Stroke.fromJson(s as Map<String, dynamic>))
+              .toList();
+        }
+
+        // Hydrate symbol image
+        Uint8List? symbolImage;
+        if (data['symbolImage'] != null) {
+          symbolImage = (data['symbolImage'] as Blob).bytes;
+        }
+        
         return GlossaryEntry(
           id: doc.id,
           english: data['english'] ?? '',
           spanish: data['spanish'] ?? '',
           definition: data['definition'] ?? '',
           synonym: data['synonym'] ?? '',
-          // symbolImage & strokes are intentionally not hydrated here (large blobs)
+          strokes: strokes,
+          symbolImage: symbolImage,
         );
       }).toList();
     } catch (e) {
@@ -207,6 +226,8 @@ class GlossaryService {
           'spanish': entry.spanish,
           'definition': entry.definition,
           'synonym': entry.synonym,
+          'strokes': entry.strokes?.map((s) => s.toJson()).toList(),
+          'symbolImage': entry.symbolImage != null ? Blob(entry.symbolImage!) : null,
           'updatedAt': FieldValue.serverTimestamp(),
         };
 
