@@ -1,5 +1,3 @@
-import 'package:shared_preferences/shared_preferences.dart';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'dart:typed_data';
@@ -29,7 +27,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   bool _isLoading = false;
   bool _hasUnsavedChanges = false;
 
-  // Firestore service
+  // Glossary service (now uses SharedPreferences)
   final GlossaryService _glossaryService = GlossaryService();
 
   // Canvas/Drawing controllers
@@ -50,31 +48,46 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     if (widget.glossaryItem != null) _loadEntries();
   }
 
+  /// Load entries from SharedPreferences
   Future<void> _loadEntries() async {
     setState(() => _isLoading = true);
+    
     try {
+      print('[GlossaryScreen] Loading entries for glossary: ${glossaryItem.id}');
+      
       final entries = await _glossaryService.loadEntries(glossaryItem.id);
+      
       if (mounted) {
         setState(() {
           glossaryItem.entries = entries;
           _isLoading = false;
         });
+        
+        print('[GlossaryScreen] Loaded ${entries.length} entries');
       }
     } catch (e) {
+      print('[GlossaryScreen] Failed to load entries: $e');
+      
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load entries: $e')),
-      );
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load entries: $e')),
+        );
+      }
     }
   }
 
-  // Delete entry (instant UI update, backend saved on top button)
+  /// Delete entry (instant UI update, saved to SharedPreferences on Save button)
   void _deleteEntry(int index) {
     if (index < 0 || index >= glossaryItem.entries.length) return;
+    
     setState(() {
       glossaryItem.deleteEntry(index);
       _hasUnsavedChanges = true;
     });
+    
+    print('[GlossaryScreen] Entry deleted, unsaved changes: true');
   }
 
   // Canvas/Symbol Methods
@@ -86,7 +99,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
       ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       return byteData?.buffer.asUint8List();
     } catch (e) {
-      debugPrint("Error capturing canvas: $e");
+      debugPrint("[GlossaryScreen] Error capturing canvas: $e");
       return null;
     }
   }
@@ -96,6 +109,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
 
     if (editingIndex != null && imageData != null) {
       final index = editingIndex!;
+      
       setState(() {
         glossaryItem.entries[index].symbolImage = imageData;
         glossaryItem.entries[index].strokes = List.from(_currentStrokes);
@@ -106,18 +120,23 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
         _currentStrokeStartTime = null;
         _hasUnsavedChanges = true;
       });
+      
+      print('[GlossaryScreen] Symbol saved for entry $index, ${_currentStrokes.length} strokes');
     }
   }
 
   // Cell Interaction Methods
   void _onCellTap(int rowIndex, int columnIndex) {
     if (columnIndex == 4) {
+      // Symbol column
       final entry = glossaryItem.entries[rowIndex];
+      
       if (entry.symbolImage != null) {
+        // Show existing symbol
         showDialog(
           context: context,
           builder: (context) => AlertDialog(
-            title: Text('Current Symbol'),
+            title: const Text('Current Symbol'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -127,25 +146,25 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                   height: 400,
                   fit: BoxFit.contain,
                 ),
-                SizedBox(height: 16),
+                const SizedBox(height: 16),
                 if (entry.strokes != null && entry.strokes!.isNotEmpty)
                   Text(
                     '${entry.strokes!.length} stroke(s)',
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
-                SizedBox(height: 8),
-                Text(
+                const SizedBox(height: 8),
+                const Text(
                   'What would you like to do?',
                   style: TextStyle(fontSize: 18),
                 ),
               ],
             ),
             actionsAlignment: MainAxisAlignment.spaceEvenly,
-            actionsPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            actionsPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: Text('Cancel'),
+                child: const Text('Cancel'),
               ),
               TextButton(
                 onPressed: () {
@@ -156,7 +175,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                   });
                   Navigator.pop(context);
                 },
-                child: Text('Delete Symbol', style: TextStyle(color: Colors.red)),
+                child: const Text('Delete Symbol', style: TextStyle(color: Colors.red)),
               ),
               ElevatedButton(
                 onPressed: () {
@@ -170,18 +189,20 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                   backgroundColor: Colors.white,
                   foregroundColor: Colors.black,
                 ),
-                child: Text('Replace Drawing'),
+                child: const Text('Replace Drawing'),
               ),
             ],
           ),
         );
       } else {
+        // No symbol yet, open canvas
         setState(() {
           editingIndex = rowIndex;
           showCanvas = true;
         });
       }
     } else {
+      // Text field columns
       String currentValue = '';
       switch (columnIndex) {
         case 0:
@@ -204,11 +225,17 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
         context: context,
         builder: (context) => AlertDialog(
           title: Text(['English', 'Spanish', 'Definition', 'Synonym'][columnIndex]),
-          content: TextField(controller: _editController),
+          content: TextField(
+            controller: _editController,
+            autofocus: true,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+            ),
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text('Cancel'),
+              child: const Text('Cancel'),
             ),
             ElevatedButton(
               onPressed: () {
@@ -231,7 +258,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                 });
                 Navigator.pop(context);
               },
-              child: Text('Save'),
+              child: const Text('Save'),
             ),
           ],
         ),
@@ -239,7 +266,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     }
   }
 
-  // Add new entry
+  /// Add new entry
   void _addNewEntry() {
     final newEntry = GlossaryEntry(
       english: '',
@@ -253,34 +280,61 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
       _hasUnsavedChanges = true;
     });
 
-    Future.delayed(Duration(milliseconds: 100), () {
+    print('[GlossaryScreen] New entry added, total: ${glossaryItem.entries.length}');
+
+    // Auto-scroll to new entry
+    Future.delayed(const Duration(milliseconds: 100), () {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
-          duration: Duration(milliseconds: 300),
+          duration: const Duration(milliseconds: 300),
           curve: Curves.easeOut,
         );
       }
     });
   }
 
-  // Save all entries to Firestore
+  /// Save all entries to SharedPreferences
   Future<void> _saveAllGlossaryEntries() async {
-    if (!_hasUnsavedChanges) return;
+    if (!_hasUnsavedChanges) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No changes to save')),
+      );
+      return;
+    }
 
     setState(() => _isLoading = true);
+    
     try {
+      print('[GlossaryScreen] Saving ${glossaryItem.entries.length} entries...');
+      
       await _glossaryService.saveAllEntries(glossaryItem.id, glossaryItem.entries);
+      
       setState(() {
         _isLoading = false;
         _hasUnsavedChanges = false;
       });
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Glossary saved successfully')));
+      
+      print('[GlossaryScreen] All entries saved successfully');
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Glossary saved successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     } catch (e) {
+      print('[GlossaryScreen] Failed to save entries: $e');
+      
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Failed to save glossary: $e')));
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save glossary: $e')),
+        );
+      }
     }
   }
 
@@ -293,23 +347,27 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
           final discard = await showDialog<bool>(
             context: context,
             builder: (context) => AlertDialog(
-              title: Text('Unsaved Changes'),
-              content: Text('You have unsaved changes. Save before leaving?'),
+              title: const Text('Unsaved Changes'),
+              content: const Text('You have unsaved changes. Save before leaving?'),
               actions: [
                 TextButton(
-                  child: Text('Discard'),
+                  child: const Text('Discard'),
                   onPressed: () => Navigator.of(context).pop(true),
                 ),
                 TextButton(
-                  child: Text('Cancel'),
+                  child: const Text('Cancel'),
                   onPressed: () => Navigator.of(context).pop(false),
                 ),
                 ElevatedButton(
-                  child: Text('Save'),
+                  child: const Text('Save'),
                   onPressed: () async {
                     await _saveAllGlossaryEntries();
                     Navigator.of(context).pop(true);
                   },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                  ),
                 ),
               ],
             ),
@@ -323,14 +381,51 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
           title: Text(glossaryItem.name),
           backgroundColor: Colors.grey[800],
           actions: [
+            if (_hasUnsavedChanges)
+              Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.orange,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text(
+                      'Unsaved',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             IconButton(
-              icon: Icon(Icons.save),
-              onPressed: _saveAllGlossaryEntries,
+              icon: const Icon(Icons.save),
+              onPressed: _isLoading ? null : _saveAllGlossaryEntries,
+              tooltip: 'Save All Entries',
             ),
           ],
         ),
         body: _isLoading
-            ? Center(child: CircularProgressIndicator())
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const CircularProgressIndicator(),
+                    const SizedBox(height: 16),
+                    Text(
+                      _hasUnsavedChanges ? 'Saving entries...' : 'Loading entries...',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              )
             : showCanvas
                 ? _buildCanvasView()
                 : _buildTableView(),
@@ -339,17 +434,18 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                 onPressed: _addNewEntry,
                 backgroundColor: Colors.black,
                 foregroundColor: Colors.white,
-                child: Icon(Icons.add),
+                child: const Icon(Icons.add),
+                tooltip: 'Add Entry',
               )
             : null,
       ),
     );
   }
 
-  // Updated _buildTableView row to include delete button
   Widget _buildTableView() {
     return Column(
       children: [
+        // Header row
         Container(
           color: Colors.black,
           child: Row(
@@ -363,50 +459,79 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
             ],
           ),
         ),
+        
+        // Data rows
         Expanded(
-          child: ListView.builder(
-            controller: _scrollController,
-            itemCount: glossaryItem.entries.length,
-            itemBuilder: (context, index) {
-              final entry = glossaryItem.entries[index];
-              return Container(
-                decoration: BoxDecoration(
-                  border: Border(bottom: BorderSide(color: Colors.grey[400]!)),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    _buildDataCell(entry.english, index, 0, flex: 2),
-                    _buildDataCell(entry.spanish, index, 1, flex: 2),
-                    _buildDataCell(entry.definition, index, 2, flex: 3),
-                    _buildDataCell(entry.synonym, index, 3, flex: 2),
-                    _buildSymbolCell(entry, index, flex: 1),
-                    Expanded(
-                      flex: 1,
-                      child: IconButton(
-                        icon: Icon(Icons.delete, color: Colors.red),
-                        onPressed: () => _deleteEntry(index),
+          child: glossaryItem.entries.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.book_outlined, size: 64, color: Colors.grey[400]),
+                      const SizedBox(height: 16),
+                      Text(
+                        'No entries yet',
+                        style: TextStyle(
+                          fontSize: 18,
+                          color: Colors.grey[600],
+                        ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 8),
+                      Text(
+                        'Tap the + button to add an entry',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey[500],
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  controller: _scrollController,
+                  itemCount: glossaryItem.entries.length,
+                  itemBuilder: (context, index) {
+                    final entry = glossaryItem.entries[index];
+                    return Container(
+                      decoration: BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(color: Colors.grey[400]!),
+                        ),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          _buildDataCell(entry.english, index, 0, flex: 2),
+                          _buildDataCell(entry.spanish, index, 1, flex: 2),
+                          _buildDataCell(entry.definition, index, 2, flex: 3),
+                          _buildDataCell(entry.synonym, index, 3, flex: 2),
+                          _buildSymbolCell(entry, index, flex: 1),
+                          Expanded(
+                            flex: 1,
+                            child: IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.red),
+                              onPressed: () => _deleteEntry(index),
+                              tooltip: 'Delete Entry',
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
                 ),
-              );
-            },
-          ),
         ),
       ],
     );
   }
 
- 
   Widget _buildHeaderCell(String title, {int flex = 1}) {
     return Expanded(
       flex: flex,
       child: Container(
-        padding: EdgeInsets.all(12),
+        padding: const EdgeInsets.all(12),
         child: Text(
           title,
-          style: TextStyle(
+          style: const TextStyle(
             fontWeight: FontWeight.bold,
             fontSize: 14,
             color: Colors.white,
@@ -423,7 +548,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
       child: InkWell(
         onTap: () => _onCellTap(rowIndex, columnIndex),
         child: Container(
-          padding: EdgeInsets.all(12),
+          padding: const EdgeInsets.all(12),
           height: 56,
           alignment: Alignment.center,
           child: Text(
@@ -446,12 +571,12 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
       child: InkWell(
         onTap: () => _onCellTap(rowIndex, 4),
         child: Container(
-          padding: EdgeInsets.all(8),
+          padding: const EdgeInsets.all(8),
           height: 56,
           alignment: Alignment.center,
           child: entry.symbolImage != null
               ? Image.memory(entry.symbolImage!, width: 40, height: 40)
-              : Icon(Icons.draw, color: Colors.grey),
+              : const Icon(Icons.draw, color: Colors.grey),
         ),
       ),
     );
@@ -464,30 +589,34 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
           padding: const EdgeInsets.all(8.0),
           child: Row(
             children: [
-              Text(
+              const Text(
                 'Draw Symbol:',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
-              Spacer(),
+              const Spacer(),
               Text(
                 '${_currentStrokes.length} stroke(s)',
-                style: TextStyle(fontSize: 12, color: Colors.grey),
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
               ),
-              SizedBox(width: 16),
+              const SizedBox(width: 16),
               IconButton(
-                icon: Icon(Icons.undo),
+                icon: const Icon(Icons.undo),
                 onPressed: () {
-                  if (_currentStrokes.isNotEmpty) setState(() => _currentStrokes.removeLast());
+                  if (_currentStrokes.isNotEmpty) {
+                    setState(() => _currentStrokes.removeLast());
+                  }
                 },
+                tooltip: 'Undo Last Stroke',
               ),
               IconButton(
-                icon: Icon(Icons.clear),
+                icon: const Icon(Icons.clear),
                 onPressed: () {
                   setState(() {
                     _currentStrokes.clear();
                     _currentStrokePoints.clear();
                   });
                 },
+                tooltip: 'Clear Canvas',
               ),
             ],
           ),
@@ -552,15 +681,15 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                     _currentStrokePoints.clear();
                   });
                 },
-                child: Text('Cancel'),
+                child: const Text('Cancel'),
               ),
               ElevatedButton(
                 onPressed: _currentStrokes.isNotEmpty ? _saveSymbol : null,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.black,
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
                 ),
-                child: Text('Save Symbol'),
+                child: const Text('Save Symbol'),
               ),
             ],
           ),

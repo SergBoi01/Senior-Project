@@ -1,4 +1,3 @@
-// screens/library_screen.dart
 import 'package:flutter/material.dart';
 import 'dart:math';
 
@@ -37,73 +36,92 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
+  /// Load library structure from SharedPreferences
   Future<void> _loadLibrary() async {
     if (!mounted) return;
     setState(() => _isLoading = true);
 
     try {
-      debugPrint('[LIB] _loadLibrary: start');
+      debugPrint('[LibraryScreen] Loading library structure...');
+      
       final rootFolders = await _glossaryService.loadRootFolders();
+      
       if (!mounted) return;
+      
       setState(() {
         _rootFolders = rootFolders;
         _isLoading = false;
       });
-      debugPrint('[LIB] _loadLibrary: loaded ${_rootFolders.length} root folders');
+      
+      debugPrint('[LibraryScreen] Loaded ${_rootFolders.length} root folders');
     } catch (e) {
-      debugPrint('[LIB] _loadLibrary FAILED: $e');
-      if (mounted) setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load library: $e')),
-      );
-    }
-  }
-
-  Future<void> _saveFolderRecursive(FolderItem folder) async {
-    // Ensure folder metadata saved (should already be saved when created/renamed)
-    await _glossary_service_saveFolderSafe(folder);
-    for (var child in folder.children) {
-      if (child is FolderItem) {
-        await _saveFolderRecursive(child);
-      } else if (child is GlossaryItem) {
-        // Ensure glossary metadata saved if needed
-        await _glossary_service_saveGlossarySafe(child);
+      debugPrint('[LibraryScreen] Failed to load library: $e');
+      
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load library: $e')),
+        );
       }
     }
   }
 
-  Future<void> _glossary_service_saveFolderSafe(FolderItem folder) async {
+  /// Save folder with error handling
+  Future<void> _saveFolderSafe(FolderItem folder) async {
     try {
+      debugPrint('[LibraryScreen] Saving folder: ${folder.id} "${folder.name}"');
       await _glossaryService.saveFolder(folder);
-      debugPrint('[LIB] saved folder ${folder.id}');
+      debugPrint('[LibraryScreen] Folder saved successfully');
     } catch (e) {
-      debugPrint('[LIB] saveFolder FAILED for ${folder.id}: $e');
+      debugPrint('[LibraryScreen] Failed to save folder ${folder.id}: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save folder: $e')),
+        );
+      }
     }
   }
 
-  Future<void> _glossary_service_saveGlossarySafe(GlossaryItem g) async {
+  /// Save glossary with error handling
+  Future<void> _saveGlossarySafe(GlossaryItem glossary) async {
     try {
-      await _glossaryService.saveGlossary(g);
-      debugPrint('[LIB] saved glossary ${g.id}');
+      debugPrint('[LibraryScreen] Saving glossary: ${glossary.id} "${glossary.name}"');
+      await _glossaryService.saveGlossary(glossary);
+      debugPrint('[LibraryScreen] Glossary saved successfully');
     } catch (e) {
-      debugPrint('[LIB] saveGlossary FAILED for ${g.id}: $e');
+      debugPrint('[LibraryScreen] Failed to save glossary ${glossary.id}: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save glossary: $e')),
+        );
+      }
     }
   }
 
-  String _generateId() => DateTime.now().millisecondsSinceEpoch.toString() + Random().nextInt(1000).toString();
+  /// Generate unique ID for new items
+  String _generateId() {
+    return DateTime.now().millisecondsSinceEpoch.toString() + 
+           Random().nextInt(1000).toString();
+  }
 
+  /// Navigate into a folder
   void _navigateToFolder(FolderItem folder) {
     setState(() => _folderStack.add(folder));
+    debugPrint('[LibraryScreen] Navigated to folder: ${folder.name}');
   }
 
+  /// Navigate back
   void _navigateBack() {
     if (_folderStack.isNotEmpty) {
+      final folder = _folderStack.last;
       setState(() => _folderStack.removeLast());
+      debugPrint('[LibraryScreen] Navigated back from: ${folder.name}');
     } else {
       Navigator.pop(context);
     }
   }
 
+  /// Create new folder
   void _createFolder() {
     final TextEditingController nameController = TextEditingController();
 
@@ -116,14 +134,23 @@ class _LibraryScreenState extends State<LibraryScreen> {
           autofocus: true,
           decoration: InputDecoration(
             labelText: _currentFolder == null ? 'Folder Name' : 'Subfolder Name',
-            border: OutlineInputBorder(),
+            border: const OutlineInputBorder(),
+            hintText: 'Enter a name...',
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
             onPressed: () async {
-              if (nameController.text.trim().isEmpty) return;
+              if (nameController.text.trim().isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a name')),
+                );
+                return;
+              }
 
               final folder = FolderItem(
                 id: _generateId(),
@@ -132,35 +159,36 @@ class _LibraryScreenState extends State<LibraryScreen> {
               );
 
               setState(() {
-                if (_currentFolder == null) _rootFolders.add(folder);
-                else _currentFolder!.addChild(folder);
+                if (_currentFolder == null) {
+                  _rootFolders.add(folder);
+                } else {
+                  _currentFolder!.addChild(folder);
+                }
               });
 
               Navigator.pop(context);
 
-              // Persist immediately
-              try {
-                debugPrint('[LIB] createFolder: saving folder id=${folder.id}');
-                await _glossaryService.saveFolder(folder);
-                debugPrint('[LIB] createFolder: saved folder id=${folder.id}');
-              } catch (e) {
-                debugPrint('[LIB] createFolder FAILED: $e');
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to save folder: $e')));
-                }
-              }
+              // Save immediately to SharedPreferences
+              await _saveFolderSafe(folder);
+              
+              debugPrint('[LibraryScreen] Created folder: ${folder.name}');
             },
-            child: Text('Create'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Create'),
           ),
         ],
       ),
     );
   }
 
+  /// Create new glossary
   void _createGlossary() {
     if (_currentFolder == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Glossaries must be created inside a folder')),
+        const SnackBar(content: Text('Glossaries must be created inside a folder')),
       );
       return;
     }
@@ -170,21 +198,27 @@ class _LibraryScreenState extends State<LibraryScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Create Glossary'),
+        title: const Text('Create Glossary'),
         content: TextField(
           controller: nameController,
           autofocus: true,
-          decoration: InputDecoration(
+          decoration: const InputDecoration(
             labelText: 'Glossary Name *',
             border: OutlineInputBorder(),
+            hintText: 'Enter a name...',
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
             onPressed: () async {
               if (nameController.text.trim().isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Please enter a glossary name')));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a glossary name')),
+                );
                 return;
               }
 
@@ -197,37 +231,45 @@ class _LibraryScreenState extends State<LibraryScreen> {
               setState(() => _currentFolder!.addChild(glossary));
               Navigator.pop(context);
 
-              // Persist glossary metadata immediately
-              try {
-                debugPrint('[LIB] createGlossary: saving glossary id=${glossary.id}');
-                await _glossaryService.saveGlossary(glossary);
-                debugPrint('[LIB] createGlossary: saved glossary id=${glossary.id}');
+              // Save glossary metadata immediately to SharedPreferences
+              await _saveGlossarySafe(glossary);
+              
+              debugPrint('[LibraryScreen] Created glossary: ${glossary.name}');
+              
+              if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Glossary created. Remember to Save inside the Glossary screen.')),
+                  const SnackBar(
+                    content: Text('Glossary created. Add entries inside the glossary.'),
+                  ),
                 );
-              } catch (e) {
-                debugPrint('[LIB] createGlossary FAILED: $e');
-                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to save glossary: $e')));
               }
             },
-            child: Text('Create'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Create'),
           ),
         ],
       ),
     );
   }
 
+  /// Show dialog to choose between folder/glossary creation
   void _showCreateDialog() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Create New'),
+        title: const Text('Create New'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: Icon(Icons.folder),
+              leading: const Icon(Icons.folder, color: Colors.orange),
               title: Text(_currentFolder == null ? 'Folder' : 'Subfolder'),
+              subtitle: Text(_currentFolder == null 
+                  ? 'Organize your glossaries'
+                  : 'Create a subfolder'),
               onTap: () {
                 Navigator.pop(context);
                 _createFolder();
@@ -235,8 +277,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ),
             if (_currentFolder != null)
               ListTile(
-                leading: Icon(Icons.book),
-                title: Text('Glossary'),
+                leading: const Icon(Icons.book, color: Colors.blue),
+                title: const Text('Glossary'),
+                subtitle: const Text('Add words and symbols'),
                 onTap: () {
                   Navigator.pop(context);
                   _createGlossary();
@@ -248,6 +291,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
+  /// Rename folder or glossary
   void _renameItem(dynamic item) {
     final TextEditingController nameController = TextEditingController(text: item.name);
 
@@ -258,89 +302,138 @@ class _LibraryScreenState extends State<LibraryScreen> {
         content: TextField(
           controller: nameController,
           autofocus: true,
-          decoration: InputDecoration(
+          decoration: const InputDecoration(
             labelText: 'Name',
             border: OutlineInputBorder(),
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
             onPressed: () async {
-              if (nameController.text.trim().isEmpty) return;
+              if (nameController.text.trim().isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a name')),
+                );
+                return;
+              }
 
+              final oldName = item.name;
               setState(() => item.name = nameController.text.trim());
               Navigator.pop(context);
 
-              // Persist rename immediately
-              try {
-                if (item is FolderItem) {
-                  debugPrint('[LIB] renameItem: saving folder ${item.id}');
-                  await _glossaryService.saveFolder(item);
-                } else if (item is GlossaryItem) {
-                  debugPrint('[LIB] renameItem: saving glossary ${item.id}');
-                  await _glossaryService.saveGlossary(item);
-                }
-                debugPrint('[LIB] renameItem: saved ${item.id}');
-              } catch (e) {
-                debugPrint('[LIB] renameItem FAILED: $e');
-                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+              // Save rename immediately to SharedPreferences
+              if (item is FolderItem) {
+                await _saveFolderSafe(item);
+              } else if (item is GlossaryItem) {
+                await _saveGlossarySafe(item);
               }
+              
+              debugPrint('[LibraryScreen] Renamed: "$oldName" → "${item.name}"');
             },
-            child: Text('Save'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Save'),
           ),
         ],
       ),
     );
   }
 
+  /// Toggle checkbox (for symbol detection)
   void _toggleCheckbox(dynamic item, bool newValue) {
     setState(() => item.isChecked = newValue);
-    // Immediately persist checkbox change
+    
+    debugPrint('[LibraryScreen] Checkbox toggled: ${item.name} = $newValue');
+    
+    // Save checkbox state immediately to SharedPreferences
     if (item is FolderItem) {
-      _glossaryService.saveFolder(item).catchError((e) => debugPrint('[LIB] toggleCheckbox saveFolder FAILED: $e'));
+      _glossaryService.saveFolder(item).catchError((e) {
+        debugPrint('[LibraryScreen] Failed to save folder checkbox: $e');
+      });
     } else if (item is GlossaryItem) {
-      _glossaryService.saveGlossary(item).catchError((e) => debugPrint('[LIB] toggleCheckbox saveGlossary FAILED: $e'));
+      _glossaryService.saveGlossary(item).catchError((e) {
+        debugPrint('[LibraryScreen] Failed to save glossary checkbox: $e');
+      });
     }
   }
 
+  /// Handle item tap (navigate or open glossary)
   Future<void> _handleItemTap(dynamic item) async {
     if (item is FolderItem) {
       _navigateToFolder(item);
     } else if (item is GlossaryItem) {
-      // Pass the glossary to GlossaryScreen; GlossaryScreen will perform entry saves itself.
-      final updated = await Navigator.push(
+      debugPrint('[LibraryScreen] Opening glossary: ${item.name}');
+      
+      // Navigate to glossary screen
+      await Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => GlossaryScreen(glossaryItem: item)),
+        MaterialPageRoute(
+          builder: (_) => GlossaryScreen(glossaryItem: item),
+        ),
       );
-
-      if (updated != null && updated is GlossaryItem) {
-        setState(() {
-          final idx = _currentItems.indexWhere((c) => (c is GlossaryItem) && c.id == updated.id);
-          if (idx != -1) _currentItems[idx] = updated;
-        });
-      }
+      
+      // Refresh library after returning from glossary screen
+      // (in case entries were added/modified)
+      debugPrint('[LibraryScreen] Returned from glossary, refreshing...');
     }
   }
 
-  String _buildBreadcrumb() => _folderStack.isEmpty ? 'Library' : _folderStack.map((f) => f.name).join(' / ');
+  /// Build breadcrumb navigation path
+  String _buildBreadcrumb() {
+    if (_folderStack.isEmpty) {
+      return 'Library';
+    }
+    return _folderStack.map((f) => f.name).join(' / ');
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[300],
       appBar: AppBar(
-        title: Text(_buildBreadcrumb(), style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 20)),
+        title: Text(
+          _buildBreadcrumb(),
+          style: const TextStyle(
+            color: Colors.black,
+            fontWeight: FontWeight.bold,
+            fontSize: 20,
+          ),
+        ),
         backgroundColor: Colors.transparent,
         elevation: 0,
-        leading: IconButton(icon: Icon(Icons.arrow_back, color: Colors.black), onPressed: _navigateBack),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.black),
+          onPressed: _navigateBack,
+          tooltip: 'Back',
+        ),
       ),
       body: _isLoading
-          ? Center(child: CircularProgressIndicator())
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Loading library...',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ),
+            )
           : _currentItems.isNotEmpty
               ? GridView.builder(
-                  padding: EdgeInsets.all(16),
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  padding: const EdgeInsets.all(16),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 2,
                     crossAxisSpacing: 16,
                     mainAxisSpacing: 16,
@@ -361,14 +454,29 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.folder_open, size: 64, color: Colors.grey[600]),
-                      SizedBox(height: 16),
-                      Text(
-                        _currentFolder == null ? 'No folders yet' : 'No subfolders or glossaries yet',
-                        style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+                      Icon(
+                        Icons.folder_open,
+                        size: 64,
+                        color: Colors.grey[600],
                       ),
-                      SizedBox(height: 8),
-                      Text('Tap the + button to create', style: TextStyle(fontSize: 14, color: Colors.grey[500])),
+                      const SizedBox(height: 16),
+                      Text(
+                        _currentFolder == null
+                            ? 'No folders yet'
+                            : 'No subfolders or glossaries yet',
+                        style: TextStyle(
+                          fontSize: 18,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Tap the + button to create',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey[500],
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -376,7 +484,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
         onPressed: _currentFolder == null ? _createFolder : _showCreateDialog,
         backgroundColor: Colors.green,
         foregroundColor: Colors.white,
-        child: Icon(Icons.add),
+        child: const Icon(Icons.add),
+        tooltip: _currentFolder == null ? 'Create Folder' : 'Create New',
       ),
     );
   }

@@ -21,13 +21,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   DetectionSettings detectionSettings = DetectionSettings();
   bool isLoading = true;
 
-
   @override
   void initState() {
     super.initState();
     _loadSettings();
   }
 
+  /// Load all settings from SharedPreferences via UserDataManager
   Future<void> _loadSettings() async {
     if (widget.userID == null) {
       setState(() => isLoading = false);
@@ -36,39 +36,88 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     setState(() => isLoading = true);
 
-    await UserDataManager().loadUserData(widget.userID!);
+    try {
+      print('[Settings] Loading settings for user: ${widget.userID}');
+      
+      // Load from SharedPreferences
+      await UserDataManager().loadUserData(widget.userID!);
 
-    setState(() {
-      userCorrections = UserDataManager().corrections;
-      detectionSettings = UserDataManager().detectionSettings;
-      isLoading = false;
-    });
+      if (mounted) {
+        setState(() {
+          userCorrections = UserDataManager().corrections;
+          detectionSettings = UserDataManager().detectionSettings;
+          isLoading = false;
+        });
+        
+        print('[Settings] Loaded ${userCorrections.length} corrections');
+        print('[Settings] Time threshold: ${detectionSettings.timeThreshold}');
+        print('[Settings] Spatial threshold: ${detectionSettings.spatialThreshold}');
+      }
+    } catch (e) {
+      print('[Settings] Failed to load settings: $e');
+      
+      if (mounted) {
+        setState(() => isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load settings: $e')),
+        );
+      }
+    }
   }
 
+  /// Save corrections to SharedPreferences
   Future<void> _saveCorrections() async {
     if (widget.userID == null) return;
     
-    UserDataManager().corrections = userCorrections;
-    await UserDataManager().saveUserData(widget.userID!);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Corrections saved')),
-      );
+    try {
+      print('[Settings] Saving ${userCorrections.length} corrections');
+      
+      UserDataManager().corrections = userCorrections;
+      await UserDataManager().saveUserData(widget.userID!);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Corrections saved')),
+        );
+      }
+    } catch (e) {
+      print('[Settings] Failed to save corrections: $e');
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save: $e')),
+        );
+      }
     }
   }
 
+  /// Save detection settings to SharedPreferences
   Future<void> _saveDetectionSettings() async {
     if (widget.userID == null) return;
     
-    UserDataManager().detectionSettings = detectionSettings;
-    await UserDataManager().saveUserData(widget.userID!);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Detection settings saved')),
-      );
+    try {
+      print('[Settings] Saving detection settings');
+      
+      UserDataManager().detectionSettings = detectionSettings;
+      await UserDataManager().saveUserData(widget.userID!);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Detection settings saved')),
+        );
+      }
+    } catch (e) {
+      print('[Settings] Failed to save detection settings: $e');
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save: $e')),
+        );
+      }
     }
   }
 
+  /// Delete a user correction
   Future<void> _deleteCorrection(int index) async {
     setState(() => userCorrections.removeAt(index));
     await _saveCorrections();
@@ -80,88 +129,137 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  /// Edit a correction - load entries from SharedPreferences
   Future<void> _editCorrection(int index) async {
     if (widget.userID == null) return;
     
-    // Load library structure to get all checked glossaries
-    final libraryStructure = await UserDataManager().loadLibraryStructure(widget.userID!);
-    
-    // Collect all entries from checked glossaries
-    List<Map<String, dynamic>> allEntries = [];
-    
-    void collectEntries(dynamic item, String glossaryName) {
-      if (item is FolderItem) {
-        if (!item.isChecked) return; // Skip unchecked folders
-        
-        for (var child in item.children) {
-          collectEntries(child, glossaryName);
-        }
-      } else if (item is GlossaryItem) {
-        if (!item.isChecked) return; // Skip unchecked glossaries
-        
-        for (var entry in item.entries) {
-          allEntries.add({
-            'entry': entry,
-            'glossaryName': item.name,
-          });
+    try {
+      print('[Settings] Loading library structure for correction edit');
+      
+      // Load library structure from SharedPreferences
+      final libraryStructure = await UserDataManager().loadLibraryStructure(widget.userID!);
+      
+      // Collect all entries from checked glossaries
+      List<Map<String, dynamic>> allEntries = [];
+      
+      void collectEntries(dynamic item, String glossaryName) {
+        if (item is FolderItem) {
+          if (!item.isChecked) return; // Skip unchecked folders
+          
+          for (var child in item.children) {
+            collectEntries(child, glossaryName);
+          }
+        } else if (item is GlossaryItem) {
+          if (!item.isChecked) return; // Skip unchecked glossaries
+          
+          for (var entry in item.entries) {
+            allEntries.add({
+              'entry': entry,
+              'glossaryName': item.name,
+            });
+          }
         }
       }
-    }
-    
-    // Collect from all root folders
-    for (var rootFolder in libraryStructure) {
-      collectEntries(rootFolder, '');
-    }
+      
+      // Collect from all root folders
+      for (var rootFolder in libraryStructure) {
+        collectEntries(rootFolder, '');
+      }
 
-    if (!mounted) return;
+      print('[Settings] Found ${allEntries.length} entries from checked glossaries');
 
-    // Show search dialog
-    showDialog(
-      context: context,
-      builder: (context) => _SearchCorrectionDialog(
-        allEntries: allEntries,
-        onEntrySelected: (entry, glossaryName) async {
-          setState(() {
-            userCorrections[index] = UserCorrection(
-              drawnStrokes: userCorrections[index].drawnStrokes,
-              correctedLabel: entry.spanish,
-              timestamp: DateTime.now(),
+      if (!mounted) return;
+
+      // Show search dialog
+      showDialog(
+        context: context,
+        builder: (context) => _SearchCorrectionDialog(
+          allEntries: allEntries,
+          onEntrySelected: (entry, glossaryName) async {
+            setState(() {
+              userCorrections[index] = UserCorrection(
+                drawnStrokes: userCorrections[index].drawnStrokes,
+                correctedLabel: entry.spanish,
+                timestamp: DateTime.now(),
+              );
+            });
+            await _saveCorrections();
+            Navigator.pop(context);
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Correction updated')),
             );
-          });
-          await _saveCorrections();
-          Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Correction updated')),
-          );
-        },
-      ),
-    );
+          },
+        ),
+      );
+    } catch (e) {
+      print('[Settings] Failed to load library for edit: $e');
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load library: $e')),
+        );
+      }
+    }
   }
 
+  /// Reset detection settings to defaults
   void _resetToDefaults() async {
     setState(() => detectionSettings = DetectionSettings());
     await _saveDetectionSettings();
   }
 
+  /// Clear all corrections
   void _clearAllCorrections() async {
-    setState(() => userCorrections.clear());
-    await _saveCorrections();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clear All Corrections?'),
+        content: Text(
+          'This will delete all ${userCorrections.length} learned correction(s). This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              setState(() => userCorrections.clear());
+              await _saveCorrections();
+              
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('All corrections cleared')),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Clear All'),
+          ),
+        ],
+      ),
+    );
   }
 
-  void _showSettingInfo(String title, String description) { 
-    showDialog( 
-      context: context, 
-      builder: (context) => AlertDialog( 
-        title: Text(title), 
-        content: Text(description), 
-        actions: [ 
-          TextButton( 
-            onPressed: () => Navigator.pop(context), 
-            child: const Text('Got it'), 
-          ), 
-        ], 
-      ), 
-    ); 
+  /// Show information dialog for settings
+  void _showSettingInfo(String title, String description) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(description),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
   }
 
   String _formatDate(DateTime date) {
@@ -415,25 +513,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               max: 30,
                               divisions: 29,
                               label: "${drawingSettings.penWidth.toInt()}",
-
                               // REAL-TIME update for canvas
                               onChanged: (value) {
-                                setState((){
+                                setState(() {
                                   drawingSettings.setPenWidth(value);
                                 });
                               },
-
-                              // SAVE to Firestore only on release
+                              // SAVE to SharedPreferences only on release
                               onChangeEnd: (value) async {
                                 if (widget.userID == null) return;
 
-                                UserDataManager().penWidth = value;
-                                await UserDataManager().saveUserData(widget.userID!);
+                                try {
+                                  print('[Settings] Saving pen width: $value');
+                                  
+                                  UserDataManager().penWidth = value;
+                                  await UserDataManager().saveUserData(widget.userID!);
 
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Pen size saved')),
-                                  );
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('Pen size saved')),
+                                    );
+                                  }
+                                } catch (e) {
+                                  print('[Settings] Failed to save pen width: $e');
                                 }
                               },
                             ),
@@ -442,7 +544,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                   ),
-
 
                   const Divider(thickness: 2, height: 32),
 
@@ -520,7 +621,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ...userCorrections.asMap().entries.map((entry) {
                       final index = entry.key;
                       final correction = entry.value;
-                      
+
                       return Card(
                         margin: const EdgeInsets.symmetric(
                           horizontal: 16.0,
@@ -588,10 +689,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
     );
   }
-  
 }
 
-// NEW: Search Dialog Widget
+// Search Dialog Widget for editing corrections
 class _SearchCorrectionDialog extends StatefulWidget {
   final List<Map<String, dynamic>> allEntries;
   final Function(GlossaryEntry entry, String glossaryName) onEntrySelected;
@@ -607,7 +707,7 @@ class _SearchCorrectionDialog extends StatefulWidget {
 
 class _SearchCorrectionDialogState extends State<_SearchCorrectionDialog> {
   final TextEditingController _searchController = TextEditingController();
-  bool searchInSpanish = true; // true = Spanish, false = English
+  bool searchInSpanish = true;
   List<Map<String, dynamic>> _filteredEntries = [];
 
   @override
@@ -619,11 +719,9 @@ class _SearchCorrectionDialogState extends State<_SearchCorrectionDialog> {
 
   void _filterEntries() {
     final query = _searchController.text.toLowerCase().trim();
-    
+
     if (query.isEmpty) {
-      setState(() {
-        _filteredEntries = widget.allEntries;
-      });
+      setState(() => _filteredEntries = widget.allEntries);
       return;
     }
 
@@ -647,10 +745,7 @@ class _SearchCorrectionDialogState extends State<_SearchCorrectionDialog> {
     return AlertDialog(
       title: Row(
         children: [
-          const Expanded(
-            child: Text('Search Entry'),
-          ),
-          // Language toggle
+          const Expanded(child: Text('Search Entry')),
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -667,7 +762,7 @@ class _SearchCorrectionDialogState extends State<_SearchCorrectionDialog> {
                 onChanged: (value) {
                   setState(() {
                     searchInSpanish = value;
-                    _filterEntries(); // Re-filter with new language
+                    _filterEntries();
                   });
                 },
                 activeThumbColor: Colors.blue,
@@ -690,7 +785,6 @@ class _SearchCorrectionDialogState extends State<_SearchCorrectionDialog> {
         height: 500,
         child: Column(
           children: [
-            // Search TextField
             TextField(
               controller: _searchController,
               autofocus: true,
@@ -700,48 +794,32 @@ class _SearchCorrectionDialogState extends State<_SearchCorrectionDialog> {
                 suffixIcon: _searchController.text.isNotEmpty
                     ? IconButton(
                         icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          _searchController.clear();
-                        },
+                        onPressed: () => _searchController.clear(),
                       )
                     : null,
                 border: const OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 8),
-            
-            // Results count
             Align(
               alignment: Alignment.centerLeft,
               child: Text(
                 '${_filteredEntries.length} result(s)',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[600],
-                ),
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
               ),
             ),
             const SizedBox(height: 8),
-            
-            // Results list
             Expanded(
               child: _filteredEntries.isEmpty
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(
-                            Icons.search_off,
-                            size: 48,
-                            color: Colors.grey[400],
-                          ),
+                          Icon(Icons.search_off, size: 48, color: Colors.grey[400]),
                           const SizedBox(height: 8),
                           Text(
                             'No entries found',
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 14,
-                            ),
+                            style: TextStyle(color: Colors.grey[600], fontSize: 14),
                           ),
                         ],
                       ),
@@ -752,7 +830,7 @@ class _SearchCorrectionDialogState extends State<_SearchCorrectionDialog> {
                         final item = _filteredEntries[i];
                         final entry = item['entry'] as GlossaryEntry;
                         final glossaryName = item['glossaryName'] as String;
-                        
+
                         return ListTile(
                           title: Text(
                             '${entry.english} → ${entry.spanish}',
@@ -760,25 +838,14 @@ class _SearchCorrectionDialogState extends State<_SearchCorrectionDialog> {
                           ),
                           subtitle: Text(
                             '($glossaryName)',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                            ),
+                            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                           ),
-                          onTap: () {
-                            widget.onEntrySelected(entry, glossaryName);
-                          },
-                          // Highlight matching text
+                          onTap: () => widget.onEntrySelected(entry, glossaryName),
                           leading: CircleAvatar(
                             backgroundColor: Colors.blue[100],
                             child: Text(
-                              entry.english.isNotEmpty 
-                                  ? entry.english[0].toUpperCase()
-                                  : '?',
-                              style: const TextStyle(
-                                color: Colors.blue,
-                                fontWeight: FontWeight.bold,
-                              ),
+                              entry.english.isNotEmpty ? entry.english[0].toUpperCase() : '?',
+                              style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
                             ),
                           ),
                         );
