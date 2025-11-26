@@ -16,7 +16,7 @@ class UserDataManager {
   final PreferencesService _prefsService = PreferencesService();
 
   // User data
-  NotebookManager notebook = NotebookManager();
+  late NotebookManager notebookManager;
   List<UserCorrection> corrections = [];
   List<FolderItem> libraryRootFolders = [];
   DetectionSettings detectionSettings = DetectionSettings();
@@ -48,6 +48,9 @@ class UserDataManager {
 
       // IMPORTANT: hydrate global drawing settings
       drawingSettings.setPenWidth(penWidth);
+
+      // IMPORTANT: hydrate global drawing settings
+      notebookManager = await _prefsService.loadNotebook(userID);
 
       isLoaded = true;
       print('[UDM] loadUserData: complete');
@@ -88,6 +91,10 @@ class UserDataManager {
       // Save library structure
       await _prefsService.saveRootFolders(userID, libraryRootFolders);
       print('[UDM] saved library structure');
+
+      // Save notebook pages
+      await _prefsService.saveNotebook(userID, notebookManager);
+      print('[UDM] saved notebook pages');
 
       print('[UDM] saveUserData: complete');
     } catch (e) {

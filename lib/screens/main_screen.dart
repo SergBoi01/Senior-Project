@@ -20,13 +20,13 @@ import 'dart:convert';
 // ==================== MAIN PAGE ====================
 
 class MainPage extends StatefulWidget {
-  final String? userID;
+  final String userID;
   final List<FolderItem>? libraryStructure;
   final List<UserCorrection>? userCorrections;
 
   const MainPage({
     super.key, 
-    this.userID,
+    required this.userID,
     this.libraryStructure,
     this.userCorrections,
   });
@@ -39,7 +39,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   
   // final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  late String? userID;
+  late String userID;
   // ==================== SETTINGS ====================
   
   // These are now loaded from user preferences instead of static constants
@@ -788,7 +788,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
           IconButton(
             icon: const Icon(Icons.delete_outline, color: Colors.red),
             onPressed: () {
-              setState(() => notebook.deleteCurrentPage());
+              setState(() => notebook.deleteCurrentPage(userID));
             },
             tooltip: 'Delete Page',
           ),
@@ -934,7 +934,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                           IconButton(
                             icon: const Icon(Icons.arrow_back, size: 28),
                             onPressed: () {
-                              setState(() => notebook.prevPage());
+                              setState(() => notebook.prevPage(userID));
                             },
                             tooltip: 'Previous Page',
                           ),
@@ -959,7 +959,7 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                           IconButton(
                             icon: const Icon(Icons.arrow_forward, size: 28),
                             onPressed: () {
-                              setState(() => notebook.nextPage());
+                              setState(() => notebook.nextPage(userID));
                             },
                             tooltip: 'Next Page',
                           ),

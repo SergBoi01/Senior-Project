@@ -187,6 +187,53 @@ class PreferencesService {
     }
   }
 
+  // ==================== NOTEBOOK STORAGE ====================
+
+  Future<void> saveNotebook(String userId, NotebookManager notebook) async {
+    try {
+      final prefs = await _prefs;
+
+      final data = {
+        'pages': notebook.pages.map((p) => p.toJson()).toList(),
+        'currentIndex': notebook.currentIndex,
+      };
+
+      await prefs.setString('$_keyNotebookPages$userId', jsonEncode(data));
+    } catch (e) {
+      print('[PrefsService] Failed to save notebook: $e');
+      rethrow;
+    }
+  }
+
+  Future<NotebookManager> loadNotebook(String userId) async {
+    try {
+      final prefs = await _prefs;
+
+      final saved = prefs.getString('$_keyNotebookPages$userId');
+      final manager = NotebookManager(); // default blank manager
+
+      if (saved == null) return manager;
+
+      final decoded = jsonDecode(saved);
+
+      manager.pages = (decoded['pages'] as List)
+          .map((p) => NotebookPage.fromJson(p))
+          .toList();
+
+      manager.currentIndex = decoded['currentIndex'] ?? 0;
+
+      if (manager.pages.isEmpty) {
+        manager.pages = [NotebookPage()];
+        manager.currentIndex = 0;
+      }
+
+      return manager;
+    } catch (e) {
+      print('[PrefsService] Failed to load notebook: $e');
+      return NotebookManager();
+    }
+  }
+
   // ==================== HELPER METHODS ====================
   
   void _updateFolderInTree(FolderItem folder, List<FolderItem> rootFolders) {

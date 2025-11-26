@@ -1,8 +1,6 @@
 import 'dart:convert';
-import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'strokes_models.dart'; // For Stroke class
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'strokes_models.dart';
 
 class NotebookPage {
   List<Stroke> strokes;
@@ -11,31 +9,18 @@ class NotebookPage {
       : strokes = strokes ?? [];
 
   Map<String, dynamic> toJson() => {
-        'strokes': strokes
-            .map((s) => {
-                  'points': s.points
-                      .map((p) => {'dx': p.dx, 'dy': p.dy})
-                      .toList(),
-                  'startTime': s.startTime.millisecondsSinceEpoch,
-                  'endTime': s.endTime.millisecondsSinceEpoch,
-                })
-            .toList(),
+        'strokes': strokes.map((s) => s.toJson()).toList(),
       };
 
   factory NotebookPage.fromJson(Map<String, dynamic> json) {
     List<Stroke> strokes = [];
+
     if (json['strokes'] != null) {
       for (var s in json['strokes']) {
-        List<Offset> points = (s['points'] as List)
-            .map((p) => Offset(p['dx'], p['dy']))
-            .toList();
-        strokes.add(Stroke(
-          points: points,
-          startTime: DateTime.fromMillisecondsSinceEpoch(s['startTime']),
-          endTime: DateTime.fromMillisecondsSinceEpoch(s['endTime']),
-        ));
+        strokes.add(Stroke.fromJson(s));
       }
     }
+
     return NotebookPage(strokes: strokes);
   }
 }
@@ -46,105 +31,99 @@ class NotebookManager {
   List<NotebookPage> deletedPages = [];
 
   NotebookManager() {
-    pages.add(NotebookPage()); // start with one page
+    pages = [NotebookPage()];
   }
 
   NotebookPage get currentPage => pages[currentIndex];
 
-  void newPageAfterCurrent() {
+  // --- PAGE OPERATIONS -------------------------------------------------------
+
+  void newPageAfterCurrent(String userId) {
     pages.insert(currentIndex + 1, NotebookPage());
     currentIndex++;
-    saveToPrefs();
+    saveToPrefs(userId);
   }
 
-  void nextPage() {
+  void nextPage(String userId) {
     if (currentIndex == pages.length - 1) {
-      // At last page → create new one
       pages.add(NotebookPage());
     }
     currentIndex++;
-    saveToPrefs();
+    saveToPrefs(userId);
   }
 
-  void prevPage() {
+  void prevPage(String userId) {
     if (currentIndex > 0) {
       currentIndex--;
-      saveToPrefs();
-    }
-    
-  }
-
-  void deleteCurrentPage() {
-    if (pages.isNotEmpty) {
-      deletedPages.insert(0, pages.removeAt(currentIndex));
-      if (currentIndex >= pages.length && pages.isNotEmpty) {
-        currentIndex = pages.length - 1;
-      } else if (pages.isEmpty) {
-        pages.add(NotebookPage());
-        currentIndex = 0;
-      }
-      saveToPrefs();
+      saveToPrefs(userId);
     }
   }
 
-  void restoreLastDeleted() {
-    if (deletedPages.isNotEmpty) {
-      pages.insert(currentIndex, deletedPages.removeAt(0));
-      saveToPrefs();
+  void deleteCurrentPage(String userId) {
+    if (pages.isEmpty) return;
+
+    deletedPages.insert(0, pages.removeAt(currentIndex));
+
+    if (pages.isEmpty) {
+      pages = [NotebookPage()];
+      currentIndex = 0;
+    } else if (currentIndex >= pages.length) {
+      currentIndex = pages.length - 1;
     }
+
+    saveToPrefs(userId);
   }
 
-  Future<void> saveToPrefs() async {
+  void restoreLastDeleted(String userId) {
+    if (deletedPages.isEmpty) return;
+
+    pages.insert(currentIndex, deletedPages.removeAt(0));
+    saveToPrefs(userId);
+  }
+
+  // --- SHARED PREFERENCES STORAGE ------------------------------------------
+
+  Future<void> saveToPrefs(String userId) async {
     final prefs = await SharedPreferences.getInstance();
+
     final data = {
       'pages': pages.map((p) => p.toJson()).toList(),
       'currentIndex': currentIndex,
     };
-    await prefs.setString('notebook_data', jsonEncode(data));
+
+    await prefs.setString(
+      'user_${userId}_notebook',
+      jsonEncode(data),
+    );
   }
 
-  Future<void> loadFromPrefs() async {
+  Future<void> loadFromPrefs(String userId) async {
     final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString('notebook_data');
-    if (saved != null) {
+    final saved = prefs.getString('user_${userId}_notebook');
+
+    if (saved == null) {
+      pages = [NotebookPage()];
+      currentIndex = 0;
+      return;
+    }
+
+    try {
       final decoded = jsonDecode(saved);
       pages = (decoded['pages'] as List)
           .map((p) => NotebookPage.fromJson(p))
           .toList();
+
       currentIndex = decoded['currentIndex'] ?? 0;
-    } else {
+
+      // Safety: ensure at least one page exists
+      if (pages.isEmpty) {
+        pages = [NotebookPage()];
+        currentIndex = 0;
+      }
+    } catch (e) {
+      // corrupted data fallback
       pages = [NotebookPage()];
       currentIndex = 0;
-    }
-  }
-}
-
-extension NotebookManagerFirestore on NotebookManager {
-  Future<void> saveToFirestore(String userId) async {
-    final doc = FirebaseFirestore.instance
-        .collection('users')
-        .doc(userId)
-        .collection('notebook')
-        .doc('notebook');
-    await doc.set({
-      'pages': pages.map((p) => p.toJson()).toList(),
-      'currentIndex': currentIndex,
-    });
-  }
-
-  Future<void> loadFromFirestore(String userId) async {
-    final doc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(userId)
-        .collection('notebook')
-        .doc('notebook')
-        .get();
-    if (doc.exists) {
-      final data = doc.data()!;
-      pages = (data['pages'] as List<dynamic>)
-          .map((p) => NotebookPage.fromJson(p))
-          .toList();
-      currentIndex = data['currentIndex'] ?? 0;
     }
   }
 }
