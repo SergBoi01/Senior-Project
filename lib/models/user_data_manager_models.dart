@@ -49,7 +49,7 @@ class UserDataManager {
       // IMPORTANT: hydrate global drawing settings
       drawingSettings.setPenWidth(penWidth);
 
-      // IMPORTANT: hydrate global drawing settings
+      // Load notebook
       notebookManager = await _prefsService.loadNotebook(userID);
 
       isLoaded = true;

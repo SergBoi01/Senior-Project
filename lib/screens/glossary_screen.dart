@@ -64,6 +64,10 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
         });
         
         print('[GlossaryScreen] Loaded ${entries.length} entries');
+        for (int i = 0; i < entries.length; i++) {
+          print('[GlossaryScreen] Entry ${i}: spanish="${entries[i].spanish}", hasStrokes=${entries[i].strokes != null}, strokeCount=${entries[i].strokes?.length}\n');
+        }
+
       }
     } catch (e) {
       print('[GlossaryScreen] Failed to load entries: $e');
@@ -110,6 +114,8 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     if (editingIndex != null && imageData != null) {
       final index = editingIndex!;
       
+      print('[GlossaryScreen] Symbol saved for entry $index, ${_currentStrokes.length} strokes');
+
       setState(() {
         glossaryItem.entries[index].symbolImage = imageData;
         glossaryItem.entries[index].strokes = List.from(_currentStrokes);
@@ -121,7 +127,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
         _hasUnsavedChanges = true;
       });
       
-      print('[GlossaryScreen] Symbol saved for entry $index, ${_currentStrokes.length} strokes');
     }
   }
 

@@ -52,14 +52,14 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   bool _isDetecting = false;
   int _lastStrokeCount = 0;
 
-  final notebook = NotebookManager();
 
   bool showSpanish = true; // true = Spanish, false = English
 
 
   List<FolderItem> libraryStructure = [];
   List<UserCorrection> userCorrections = [];
-  
+  var notebook = NotebookManager();
+
   List<DetectedSymbol> detectedSymbols = [];
   List<Offset> currentStrokePoints = [];
   DateTime? currentStrokeStartTime;
@@ -586,6 +586,11 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
 
     // Get all entries from checked glossaries
     final checkedGlossaries = _getCheckedGlossaries();
+    print('[MainScreen] Checked glossaries:');
+    for (var g in checkedGlossaries) {
+      print('  - "${g.name}": ${g.entries.length} entries loaded');
+    }
+
     List<GlossaryEntry> allEntries = [];
     for (var glossary in checkedGlossaries) {
       allEntries.addAll(glossary.entries);
@@ -720,6 +725,8 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     userID = widget.userID;
     libraryStructure = widget.libraryStructure ?? UserDataManager().libraryRootFolders;
     userCorrections = widget.userCorrections ?? UserDataManager().corrections;
+    notebook = UserDataManager().notebookManager;
+
 
     // If data wasn't provided and user is logged in, load it
     if ((libraryStructure.isEmpty || userCorrections.isEmpty) && userID != null) {
@@ -728,9 +735,13 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
         setState(() {
           libraryStructure = UserDataManager().libraryRootFolders;
           userCorrections = UserDataManager().corrections;
+          notebook = UserDataManager().notebookManager;
+
         });
       });
     }
+
+
 
     // Animation controller for any UI transitions
     _animationController = AnimationController(
@@ -742,6 +753,8 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
 
     // Check which glossaries are active
     final checkedGlossaries = _getCheckedGlossaries();
+  
+
     print('MainPage initialized with ${checkedGlossaries.length} checked glossaries');
     print('MainPage initialized with ${userCorrections.length} corrections');
 
@@ -1044,7 +1057,6 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
 }
 
 // ==================== DETECTION VISUALIZER ====================
-
 class DetectionVisualizer extends StatelessWidget {
   final List<DetectedSymbol> detectedSymbols;
   final Size canvasSize;
@@ -1188,7 +1200,6 @@ class DetectionPainter extends CustomPainter {
 }
 
 // ==================== CUSTOM PAINTER ====================
-
 class CanvasPainter extends CustomPainter {
   final List<Stroke> strokes;
   final List<Offset> currentStroke;
