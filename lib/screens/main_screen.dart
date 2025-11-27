@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'login_screen.dart';
@@ -37,7 +37,8 @@ class MainPage extends StatefulWidget {
 
 class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin {
   
-  // final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  String? _username;
 
   late String? userID;
   // ==================== SETTINGS ====================
@@ -721,6 +722,8 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
     libraryStructure = widget.libraryStructure ?? UserDataManager().libraryRootFolders;
     userCorrections = widget.userCorrections ?? UserDataManager().corrections;
 
+    _loadUsername();
+
     // If data wasn't provided and user is logged in, load it
     if ((libraryStructure.isEmpty || userCorrections.isEmpty) && userID != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -747,6 +750,15 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
 
   }
 
+  void _loadUsername() {
+    final user = _auth.currentUser;
+    if (user != null) {
+      setState(() {
+        _username = user.displayName ?? user.email?.split('@').first ?? 'User';
+      });
+    }
+  }
+
   Future<void> _saveUserCorrections() async {
     final prefs = await SharedPreferences.getInstance();
     final serialized = userCorrections.map((c) => jsonEncode(c.toJson())).toList();
@@ -767,24 +779,34 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   @override
   Widget build(BuildContext context) {    
     return Scaffold(
-      backgroundColor: Colors.grey[500],
+      backgroundColor: const Color(0xFFd9d9d9),
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         automaticallyImplyLeading: false,
-        title: Text(
-          "Strokes: ${notebook.currentPage.strokes.length} | Symbols: ${detectedSymbols.length}", 
-          style: const TextStyle(color: Colors.black, fontSize: 14),
-        ),
         leading: Builder(
           builder: (context) => IconButton(
-            icon: Icon(Icons.menu, color: Colors.black),
+            icon: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 24,
+                  height: 3,
+                  color: Colors.black,
+                ),
+                const SizedBox(height: 5),
+                Container(
+                  width: 12,
+                  height: 3,
+                  color: Colors.black,
+                ),
+              ],
+            ),
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
-        // Switches between returning Spanish and English
         actions: [
-          // Delete page button in top right
           IconButton(
             icon: const Icon(Icons.delete_outline, color: Colors.red),
             onPressed: () {
@@ -813,7 +835,6 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                     });
                     print('Switched to: ${showSpanish ? "Spanish" : "English"}');
 
-                    // UPDATE EXISTING DETECTIONS
                     _updateDetectionLanguage();
                   },
                   activeThumbColor: Colors.blue,
@@ -898,139 +919,169 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
       ),
       body: Padding(
         padding: const EdgeInsets.all(15.0),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Left side - canvas
-            Expanded(
-              flex: 50,
-              child: Material(
-                elevation: 4,
-                child: Column(
-                  children: [
-                    // Canvas
-                    Expanded(
-                      child: GestureDetector(
-                        onPanStart: _onPanStart,
-                        onPanUpdate: _onPanUpdate,
-                        onPanEnd: _onPanEnd,
-                        child: SizedBox.expand(
-                          child: CustomPaint(
-                            painter: CanvasPainter(
-                              strokes: notebook.currentPage.strokes,
-                              currentStroke: currentStrokePoints,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    // Navigation buttons and page counter
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8.0),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          // Previous page arrow
-                          IconButton(
-                            icon: const Icon(Icons.arrow_back, size: 28),
-                            onPressed: () {
-                              setState(() => notebook.prevPage());
-                            },
-                            tooltip: 'Previous Page',
-                          ),
-                          const SizedBox(width: 20),
-                          // Page counter
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.grey[300],
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              'Page ${notebook.currentIndex + 1}/${notebook.pages.length}',
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 20),
-                          // Next page arrow
-                          IconButton(
-                            icon: const Icon(Icons.arrow_forward, size: 28),
-                            onPressed: () {
-                              setState(() => notebook.nextPage());
-                            },
-                            tooltip: 'Next Page',
-                          ),
-                        ],
-                      ),
-                    ),
-
-
-                    // Canvas Edit Buttons
-                    Padding(
-                      padding: const EdgeInsets.all(12.0),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              onPressed: undoStroke,
-                              icon: const Icon(Icons.undo, size: 18),
-                              label: const Text("Undo"),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              onPressed: clearCanvas,
-                              icon: const Icon(Icons.clear, size: 18),
-                              label: const Text("Clear"),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+            Padding(
+              padding: const EdgeInsets.only(left: 8.0, bottom: 16.0),
+              child: Text(
+                'Hi, ${_username ?? ''}!',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey[800],
                 ),
               ),
             ),
-            
-            const VerticalDivider(width: 1, color: Colors.grey),
-            
-            // Right side - spatial visualization
             Expanded(
-              flex: 50,
               child: Container(
-                color: Colors.grey[400],
-                child: Column(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16.0),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Row(
                   children: [
-                    const Padding(
-                      padding: EdgeInsets.all(8.0),
-                      child: Text(
-                        'Detected Symbols',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    // Left side - canvas
+                    Expanded(
+                      flex: 50,
+                      child: Column(
+                        children: [
+                          // Canvas
+                          Expanded(
+                            child: GestureDetector(
+                              onPanStart: _onPanStart,
+                              onPanUpdate: _onPanUpdate,
+                              onPanEnd: _onPanEnd,
+                              child: ClipRRect(
+                                borderRadius: const BorderRadius.only(
+                                  topLeft: Radius.circular(16.0),
+                                  bottomLeft: Radius.circular(16.0),
+                                ),
+                                child: SizedBox.expand(
+                                  child: CustomPaint(
+                                    painter: CanvasPainter(
+                                      strokes: notebook.currentPage.strokes,
+                                      currentStroke: currentStrokePoints,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          // Navigation buttons and page counter
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8.0),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                // Previous page arrow
+                                IconButton(
+                                  icon: const Icon(Icons.arrow_back, size: 28),
+                                  onPressed: () {
+                                    setState(() => notebook.prevPage());
+                                  },
+                                  tooltip: 'Previous Page',
+                                ),
+                                const SizedBox(width: 20),
+                                // Page counter
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey[200],
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    'Page ${notebook.currentIndex + 1}/${notebook.pages.length}',
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 20),
+                                // Next page arrow
+                                IconButton(
+                                  icon: const Icon(Icons.arrow_forward, size: 28),
+                                  onPressed: () {
+                                    setState(() => notebook.nextPage());
+                                  },
+                                  tooltip: 'Next Page',
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          // Canvas Edit Buttons
+                          Padding(
+                            padding: const EdgeInsets.all(12.0),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    onPressed: undoStroke,
+                                    icon: const Icon(Icons.undo, size: 18),
+                                    label: const Text("Undo"),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    onPressed: clearCanvas,
+                                    icon: const Icon(Icons.clear, size: 18),
+                                    label: const Text("Clear"),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ),
+                    
+                    const VerticalDivider(width: 1, color: Colors.grey),
+                    
+                    // Right side - transcript
                     Expanded(
-                      child: detectedSymbols.isEmpty
-                        ? const Center(
+                      flex: 50,
+                      child: Column(
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.all(8.0),
                             child: Text(
-                              'Draw symbols to see\nthem detected here',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: Colors.grey),
+                              'Transcript',
+                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                             ),
-                          )
-                        : DetectionVisualizer(
-                            detectedSymbols: detectedSymbols,
-                            canvasSize: Size(
-                              MediaQuery.of(context).size.width * 0.6,
-                              MediaQuery.of(context).size.height - 200,
-                            ),
-                            onSymbolTap: (symbol) {
-                              _showCorrectionDialog(symbol);
-                            },
                           ),
+                          Expanded(
+                            child: detectedSymbols.isEmpty
+                              ? const Center(
+                                  child: Text(
+                                    'Draw symbols to see\nthe transcript here',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(color: Colors.grey),
+                                  ),
+                                )
+                              : DetectionVisualizer(
+                                  detectedSymbols: detectedSymbols,
+                                  canvasSize: Size(
+                                    MediaQuery.of(context).size.width * 0.6,
+                                    MediaQuery.of(context).size.height - 200,
+                                  ),
+                                  onSymbolTap: (symbol) {
+                                    _showCorrectionDialog(symbol);
+                                  },
+                                ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
