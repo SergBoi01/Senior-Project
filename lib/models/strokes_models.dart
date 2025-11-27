@@ -29,7 +29,7 @@ class UserCorrection {
       drawnStrokes: (json['drawnStrokes'] as List).map((strokeJson) {
         return Stroke(
           points: (strokeJson['points'] as List)
-              .map((p) => Offset(p['dx'], p['dy']))
+              .map((p) => Offset((p['dx'] as num).toDouble(), (p['dy'] as num).toDouble()))
               .toList(),
           startTime: DateTime.fromMillisecondsSinceEpoch(strokeJson['startTime']),
           endTime: DateTime.fromMillisecondsSinceEpoch(strokeJson['endTime']),
@@ -70,7 +70,7 @@ class Stroke {
   /// Construct Stroke from JSON
   factory Stroke.fromJson(Map<String, dynamic> json) {
     List<Offset> points = (json['points'] as List)
-        .map((p) => Offset(p['dx'], p['dy']))
+        .map((p) => Offset((p['dx'] as num).toDouble(), (p['dy'] as num).toDouble()))
         .toList();
     return Stroke(
       points: points,
