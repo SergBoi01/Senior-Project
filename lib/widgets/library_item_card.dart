@@ -21,7 +21,7 @@ class LibraryItemCard extends StatelessWidget {
   bool get isChecked => item.isChecked;
   String get name => item.name;
 
-  // Show action popup when checkbox is tapped
+  // Show action popup on long press
   void _showActionPopup(BuildContext context) {
     // Determine item type text
     String itemTypeText;
@@ -106,10 +106,6 @@ class LibraryItemCard extends StatelessWidget {
                 color: Colors.grey[700]!,
                 onTap: () {
                   Navigator.pop(context);
-                  // Uncheck the item
-                  if (onCheckboxChanged != null) {
-                    onCheckboxChanged!(false);
-                  }
                   if (onRename != null) onRename!();
                 },
               ),
@@ -121,10 +117,6 @@ class LibraryItemCard extends StatelessWidget {
                 color: Colors.red[400]!,
                 onTap: () {
                   Navigator.pop(context);
-                  // Uncheck the item
-                  if (onCheckboxChanged != null) {
-                    onCheckboxChanged!(false);
-                  }
                   if (onDelete != null) onDelete!();
                 },
               ),
@@ -135,10 +127,6 @@ class LibraryItemCard extends StatelessWidget {
                 width: double.infinity,
                 child: TextButton(
                   onPressed: () {
-                    // Uncheck the item when cancelling
-                    if (onCheckboxChanged != null) {
-                      onCheckboxChanged!(false);
-                    }
                     Navigator.pop(context);
                   },
                   style: TextButton.styleFrom(
@@ -211,6 +199,7 @@ class LibraryItemCard extends StatelessWidget {
 
     return GestureDetector(
       onTap: onTap,
+      onLongPress: () => _showActionPopup(context),
       child: Container(
         decoration: BoxDecoration(
           color: cardColor,
@@ -277,20 +266,12 @@ class LibraryItemCard extends StatelessWidget {
                     ),
                   ),
                   SizedBox(width: 8),
-                  // Checkbox - tapping shows action popup when checking
+                  // Checkbox - just toggles check state
                   GestureDetector(
                     onTap: () {
-                      if (!isChecked) {
-                        // If not checked, check it and show popup
-                        if (onCheckboxChanged != null) {
-                          onCheckboxChanged!(true);
-                        }
-                        _showActionPopup(context);
-                      } else {
-                        // If already checked, just uncheck it
-                        if (onCheckboxChanged != null) {
-                          onCheckboxChanged!(false);
-                        }
+                      // Simply toggle the checkbox state
+                      if (onCheckboxChanged != null) {
+                        onCheckboxChanged!(!isChecked);
                       }
                     },
                     child: Container(
