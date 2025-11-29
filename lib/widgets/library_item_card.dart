@@ -21,17 +21,18 @@ class LibraryItemCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Card always stays white, only checkbox changes
-    Color cardColor = Colors.white;
-    Color textColor = Colors.black;
+    // Card color changes based on checked state (green when checked, white when not)
+    Color cardColor = isChecked ? Colors.green : Colors.white;
+    Color textColor = isChecked ? Colors.white : Colors.black;
 
     return GestureDetector(
       onTap: onTap,
       onLongPress: onRename,
       child: Container(
+        height: 60,
         decoration: BoxDecoration(
           color: cardColor,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(8),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.1),
@@ -40,91 +41,55 @@ class LibraryItemCard extends StatelessWidget {
             ),
           ],
         ),
-        child: Stack(
-          children: [
-            // Folder tab indicator (top-left corner)
-            if (isFolder)
-              Positioned(
-                top: 0,
-                left: 0,
-                child: Container(
-                  width: 40,
-                  height: 20,
-                  decoration: BoxDecoration(
-                    color: cardColor.withOpacity(0.8),
-                    borderRadius: BorderRadius.only(
-                      topLeft: Radius.circular(12),
-                      bottomRight: Radius.circular(8),
-                    ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // Item name
+              Expanded(
+                child: Text(
+                  name,
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-            // Content - horizontal layout
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  // Icon and item name
-                  Expanded(
-                    child: Row(
-                      children: [
-                        // Folder or Glossary icon
-                        Icon(
-                          isFolder ? Icons.folder : Icons.book,
-                          color: isFolder ? Colors.amber[700] : Colors.blue[700],
-                          size: 24,
-                        ),
-                        SizedBox(width: 12),
-                        // Item name
-                        Flexible(
-                          child: Text(
-                            name,
-                            style: TextStyle(
-                              color: textColor,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
+              SizedBox(width: 8),
+              // Checkbox (right side)
+              GestureDetector(
+                onTap: () {
+                  if (onCheckboxChanged != null) {
+                    onCheckboxChanged!(!isChecked);
+                  }
+                },
+                child: Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isChecked ? Colors.white : Colors.transparent,
+                    border: Border.all(
+                      color: isChecked ? Colors.white : Colors.green,
+                      width: 2,
                     ),
                   ),
-                  SizedBox(width: 8),
-                  // Checkbox (right side) - only this changes color
-                  GestureDetector(
-                    onTap: () {
-                      if (onCheckboxChanged != null) {
-                        onCheckboxChanged!(!isChecked);
-                      }
-                    },
-                    child: Container(
-                      width: 24,
-                      height: 24,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: isChecked ? Colors.green : Colors.white,
-                        border: Border.all(
-                          color: isChecked ? Colors.green : Colors.black,
-                          width: 2,
-                        ),
-                      ),
-                      child: isChecked
-                          ? Icon(
-                              Icons.check,
-                              size: 16,
-                              color: Colors.white,
-                            )
-                          : null,
-                    ),
-                  ),
-                ],
+                  child: isChecked
+                      ? Icon(
+                          Icons.check,
+                          size: 16,
+                          color: Colors.green,
+                        )
+                      : null,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

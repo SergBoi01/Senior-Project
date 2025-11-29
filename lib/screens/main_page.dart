@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:senior_project/screens/library_screen.dart';
 import 'package:senior_project/screens/login_screen.dart';
 import 'package:senior_project/screens/symbols_screen.dart';
+import 'package:senior_project/widgets/lined_paper_painter.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import 'package:scribble/scribble.dart';
 import 'package:flutter/rendering.dart';
@@ -23,6 +25,24 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
 
   // Store all saved drawings here
   List<Uint8List> savedImages = [];
+  
+  // Transcript lines
+  List<String> transcriptLines = [];
+  bool isMuted = false;
+  
+  // Get user's display name
+  String get _userName {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      if (user.displayName != null && user.displayName!.isNotEmpty) {
+        return user.displayName!;
+      } else if (user.email != null) {
+        // Extract name from email (part before @)
+        return user.email!.split('@')[0];
+      }
+    }
+    return 'User';
+  }
 
   Future<void> _saveDrawing() async {
     try {
@@ -68,45 +88,44 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[500],
+      backgroundColor: Colors.grey[300],
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: Colors.grey[300],
         elevation: 0,
         automaticallyImplyLeading: false,
-        title: const Text(
-          'Hello user',
-          style: TextStyle(color: Colors.black),
+        title: Text(
+          'Hi, $_userName!',
+          style: TextStyle(
+            color: Colors.black,
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         leading: Builder(
           builder: (context) => IconButton(
-            icon: AnimatedBuilder(
-              animation: _animationController,
-              builder: (context, child) {
-                return Transform.rotate(
-                  angle: _animationController.value * 0.5 * 3.141592653589793,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        height: 2,
-                        width: 20,
-                        color: Colors.black,
-                      ),
-                      const SizedBox(height: 4),
-                      Container(
-                        height: 2,
-                        width: 15,
-                        color: Colors.black,
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
+            icon: Icon(Icons.menu, color: Colors.black),
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
+        actions: [
+          IconButton(
+            icon: Icon(
+              isMuted ? Icons.volume_off : Icons.volume_up,
+              color: Colors.black,
+            ),
+            onPressed: () {
+              setState(() {
+                isMuted = !isMuted;
+              });
+            },
+          ),
+          IconButton(
+            icon: Icon(Icons.more_vert, color: Colors.black),
+            onPressed: () {
+              // Show menu options
+            },
+          ),
+        ],
       ),
       drawer: Drawer(
         backgroundColor: Colors.black,
@@ -161,84 +180,127 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
           ],
         ),
       ),
-      body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 15.0, vertical: 15.0),
-        child: Row(
-          children: [
-            Expanded(
-              child: Material(
-                elevation: 4,
-                child: Column(
-                  children: [
-                  // Toolbar (Undo + Clear + Save)
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.undo),
-                          onPressed: () => _notifier.undo(),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.clear),
-                          onPressed: () => _notifier.clear(),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.save),
-                          onPressed: _saveDrawing,
-                        ),
-                      ],
+      body: Container(
+        margin: EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.grey[200],
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.black, width: 1),
+          ),
+          child: Row(
+            children: [
+              // Left Column - Handwritten Notes (Drawing Area)
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    border: Border(
+                      right: BorderSide(color: Colors.black, width: 1),
                     ),
                   ),
-                  // Drawing Area
-                  Expanded(
-                    child: RepaintBoundary(
-                      key: _repaintKey,
-                      child: Container(
-                        color: Colors.white,
+                  child: Stack(
+                    children: [
+                      // Lined paper background
+                      CustomPaint(
+                        painter: LinedPaperPainter(),
+                        child: Container(),
+                      ),
+                      // Drawing canvas
+                      RepaintBoundary(
+                        key: _repaintKey,
                         child: Scribble(
                           notifier: _notifier,
                         ),
                       ),
-                    ),
-                  ),
-                  // Thumbnails of saved drawings
-                  SizedBox(
-                    height: 100,
-                    child: ListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: savedImages.length,
-                      itemBuilder: (context, index) {
-                        return Padding(
-                          padding: const EdgeInsets.all(4.0),
-                          child: Image.memory(
-                            savedImages[index],
-                            width: 80,
-                            height: 80,
-                            fit: BoxFit.contain,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-                ),
-              ),
-            ),
-            const VerticalDivider(width: 1, color: Colors.grey),
-            Expanded(
-              child: Material(
-                elevation: 4,
-                child: Container(
-                  color: Colors.white,
-                  child: const Center(
-                    child: Text('Transcription Area'),
+                    ],
                   ),
                 ),
               ),
-            ),
-          ],
+              // Right Column - Transcript
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Transcript Header
+                    Container(
+                      width: double.infinity,
+                      padding: EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.green,
+                        borderRadius: BorderRadius.only(
+                          topRight: Radius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        'Transcript',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    // Transcript Content
+                    Expanded(
+                      child: Container(
+                        padding: EdgeInsets.all(16),
+                        child: transcriptLines.isEmpty
+                            ? Center(
+                                child: Text(
+                                  'Transcription will appear here',
+                                  style: TextStyle(
+                                    color: Colors.grey[600],
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              )
+                            : ListView.builder(
+                                itemCount: transcriptLines.length,
+                                itemBuilder: (context, index) {
+                                  return Padding(
+                                    padding: EdgeInsets.only(bottom: 8),
+                                    child: Row(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '->',
+                                          style: TextStyle(
+                                            color: Colors.black,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                        SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            transcriptLines[index],
+                                            style: TextStyle(
+                                              color: Colors.black,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _saveDrawing,
+        backgroundColor: Colors.green,
+        child: Icon(Icons.add, color: Colors.white),
       ),
     );
   }

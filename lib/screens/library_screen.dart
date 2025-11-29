@@ -449,75 +449,90 @@ class _LibraryScreenState extends State<LibraryScreen> {
             fontSize: 20,
           ),
         ),
-        backgroundColor: Colors.transparent,
+        backgroundColor: Colors.grey[300],
         elevation: 0,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: _navigateBack,
-        ),
+        leading: _folderStack.isEmpty
+            ? Builder(
+                builder: (context) => IconButton(
+                  icon: Icon(Icons.menu, color: Colors.black),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              )
+            : IconButton(
+                icon: Icon(Icons.arrow_back, color: Colors.black),
+                onPressed: _navigateBack,
+              ),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.more_vert, color: Colors.black),
+            onPressed: () {
+              // Show menu options
+            },
+          ),
+        ],
       ),
       body: _isLoading
           ? Center(child: CircularProgressIndicator())
-          : Column(
-        children: [
-          // Cards section - show folders and glossaries
-          if (_currentItems.isNotEmpty)
-            Expanded(
-              child: GridView.builder(
-                padding: EdgeInsets.all(16),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 16,
-                  childAspectRatio: 1.2,
-                ),
-                itemCount: _currentItems.length,
-                itemBuilder: (context, index) {
-                  final item = _currentItems[index];
-                  return LibraryItemCard(
-                    item: item,
-                    onTap: () => _handleItemTap(item),
-                    onRename: () => _renameItem(item),
-                    onCheckboxChanged: (value) => _toggleCheckbox(item, value),
-                  );
-                },
-              ),
-            )
-          else
-            Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.folder_open,
-                      size: 64,
-                      color: Colors.grey[600],
-                    ),
-                    SizedBox(height: 16),
-                    Text(
-                      _currentFolder == null
-                          ? 'No folders yet'
-                          : 'No Subfolders or glossary yet',
-                      style: TextStyle(
-                        fontSize: 18,
-                        color: Colors.grey[600],
+          : Container(
+              color: Colors.grey[300],
+              child: Column(
+                children: [
+                  // Cards section - show folders and glossaries
+                  if (_currentItems.isNotEmpty)
+                    Expanded(
+                      child: ListView.builder(
+                        padding: EdgeInsets.all(16),
+                        itemCount: _currentItems.length,
+                        itemBuilder: (context, index) {
+                          final item = _currentItems[index];
+                          return Padding(
+                            padding: EdgeInsets.only(bottom: 12),
+                            child: LibraryItemCard(
+                              item: item,
+                              onTap: () => _handleItemTap(item),
+                              onRename: () => _renameItem(item),
+                              onCheckboxChanged: (value) => _toggleCheckbox(item, value),
+                            ),
+                          );
+                        },
+                      ),
+                    )
+                  else
+                    Expanded(
+                      child: Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.folder_open,
+                              size: 64,
+                              color: Colors.grey[600],
+                            ),
+                            SizedBox(height: 16),
+                            Text(
+                              _currentFolder == null
+                                  ? 'No folders yet'
+                                  : 'No Subfolders or glossary yet',
+                              style: TextStyle(
+                                fontSize: 18,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                            SizedBox(height: 8),
+                            Text(
+                              'Tap the + button to create',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[500],
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                    SizedBox(height: 8),
-                    Text(
-                      'Tap the + button to create',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey[500],
-                      ),
-                    ),
-                  ],
-                ),
+                ],
               ),
             ),
-        ],
-      ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
           if (_currentFolder == null) {
