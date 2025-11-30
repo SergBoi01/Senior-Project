@@ -1,16 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:senior_project/models/strokes_models.dart';
-import 'package:senior_project/models/library_models.dart';
-import 'package:senior_project/models/detection_settings_models.dart';
-import 'package:senior_project/models/user_data_manager_models.dart';
+import 'package:senior_project/models/strokes_model.dart';
+import 'package:senior_project/models/library_model.dart';
+import 'package:senior_project/models/settings_model.dart';
 
-import 'package:senior_project/services/drawing_settings.dart';
+import 'package:senior_project/services/backend_manager.dart';
 
 class SettingsScreen extends StatefulWidget {
-  final String? userID;
 
-  const SettingsScreen({super.key, this.userID});
+  const SettingsScreen({super.key});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -18,7 +17,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   List<UserCorrection> userCorrections = [];
-  DetectionSettings detectionSettings = DetectionSettings();
+  Settings detectionSettings = Settings();
   bool isLoading = true;
 
   @override
@@ -27,25 +26,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadSettings();
   }
 
-  /// Load all settings from SharedPreferences via UserDataManager
+  /// Load all settings from SharedPreferences via BackendManager
   Future<void> _loadSettings() async {
-    if (widget.userID == null) {
-      setState(() => isLoading = false);
-      return;
-    }
 
     setState(() => isLoading = true);
 
     try {
-      print('[Settings] Loading settings for user: ${widget.userID}');
+      print('[Settings] Loading settings for user: ');
       
       // Load from SharedPreferences
-      await UserDataManager().loadUserData(widget.userID!);
+      await BackendManager().loadUserData();
 
       if (mounted) {
         setState(() {
-          userCorrections = UserDataManager().corrections;
-          detectionSettings = UserDataManager().detectionSettings;
+          userCorrections = BackendManager().correctionService.corrections;
+          detectionSettings = BackendManager().settingsService.detectionSettings;
           isLoading = false;
         });
         
@@ -67,13 +62,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// Save corrections to SharedPreferences
   Future<void> _saveCorrections() async {
-    if (widget.userID == null) return;
     
     try {
       print('[Settings] Saving ${userCorrections.length} corrections');
       
-      UserDataManager().corrections = userCorrections;
-      await UserDataManager().saveUserData(widget.userID!);
+      BackendManager().correctionService.corrections = userCorrections;
+      await BackendManager().saveUserData();
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -93,13 +87,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// Save detection settings to SharedPreferences
   Future<void> _saveDetectionSettings() async {
-    if (widget.userID == null) return;
     
     try {
       print('[Settings] Saving detection settings');
       
-      UserDataManager().detectionSettings = detectionSettings;
-      await UserDataManager().saveUserData(widget.userID!);
+      BackendManager().settingsService.detectionSettings = detectionSettings;
+      await BackendManager().saveUserData();
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -131,13 +124,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// Edit a correction - load entries from SharedPreferences
   Future<void> _editCorrection(int index) async {
-    if (widget.userID == null) return;
     
     try {
       print('[Settings] Loading library structure for correction edit');
-      
-      // Load library structure from SharedPreferences
-      final libraryStructure = await UserDataManager().loadLibraryStructure(widget.userID!);
       
       // Collect all entries from checked glossaries
       List<Map<String, dynamic>> allEntries = [];
@@ -160,6 +149,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           }
         }
       }
+
+      // Collect from all root folders
+      await BackendManager().libraryService.loadLibrary();
+      final libraryStructure = BackendManager().libraryService.rootFolders;
       
       // Collect from all root folders
       for (var rootFolder in libraryStructure) {
@@ -204,7 +197,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// Reset detection settings to defaults
   void _resetToDefaults() async {
-    setState(() => detectionSettings = DetectionSettings());
+    setState(() => detectionSettings = BackendManager().settingsService.detectionSettings);
     await _saveDetectionSettings();
   }
 
@@ -266,6 +259,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return '${date.month}/${date.day}/${date.year} ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
   }
 
+  Future<void> _superReset(BuildContext context) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm Super Reset'),
+        content: const Text(
+          'This will permanently delete all app data stored locally. This action cannot be undone. Are you sure?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete All Data'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear(); // This deletes EVERYTHING in SharedPreferences
+
+      // Optional: show confirmation
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('All local data has been deleted.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -286,6 +320,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
+                        // title
                         const Text(
                           'Detection Settings',
                           style: TextStyle(
@@ -293,6 +328,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             fontWeight: FontWeight.bold,
                           ),
                         ),
+
+                        // Super reset button
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: () => _superReset(context),
+                          child: const Text('Super Reset (Delete All Data)'),
+                        ),
+
+                        // resets settings
                         TextButton.icon(
                           onPressed: _resetToDefaults,
                           icon: const Icon(Icons.refresh, size: 18),
@@ -500,7 +547,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              '${drawingSettings.penWidth.toInt()} px',
+                              '${BackendManager().settingsService.penWidth.toInt()} px',
                               style: TextStyle(
                                 fontSize: 18,
                                 color: Colors.blue[700],
@@ -508,27 +555,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ),
                             ),
                             Slider(
-                              value: drawingSettings.penWidth,
+                              value: BackendManager().settingsService.penWidth,
                               min: 1,
                               max: 30,
                               divisions: 29,
-                              label: "${drawingSettings.penWidth.toInt()}",
-                              // REAL-TIME update for canvas
+                              label: "${BackendManager().settingsService.penWidth.toInt()}",
+                              // Update locally for real-time preview
                               onChanged: (value) {
                                 setState(() {
-                                  drawingSettings.setPenWidth(value);
+                                  BackendManager().settingsService.penWidth = value;
                                 });
                               },
-                              // SAVE to SharedPreferences only on release
+                              // Save persistently when user finishes sliding
                               onChangeEnd: (value) async {
-                                if (widget.userID == null) return;
-
                                 try {
-                                  print('[Settings] Saving pen width: $value');
-                                  
-                                  UserDataManager().penWidth = value;
-                                  await UserDataManager().saveUserData(widget.userID!);
-
+                                  await BackendManager().saveUserData();
                                   if (mounted) {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(content: Text('Pen size saved')),

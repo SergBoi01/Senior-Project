@@ -3,39 +3,32 @@ import 'package:flutter/rendering.dart';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import '../screens/main_screen.dart';
-import '../models/library_models.dart';
-import '../models/strokes_models.dart';
-import '../services/glossary_service.dart';
+import 'main_screen.dart';
+import '../models/library_model.dart';
+import '../models/strokes_model.dart';
+import '../services/library_services.dart';
 
 class GlossaryScreen extends StatefulWidget {
-  final GlossaryItem? glossaryItem;
+  final GlossaryItem glossaryItem;
 
-  const GlossaryScreen({super.key, this.glossaryItem});
+  const GlossaryScreen({super.key, required this.glossaryItem});
 
   @override
   _GlossaryScreenState createState() => _GlossaryScreenState();
 }
 
 class _GlossaryScreenState extends State<GlossaryScreen> {
-  // State Variables
   late GlossaryItem glossaryItem;
-  int? editingIndex;
   bool showCanvas = false;
-
-  // Loading state
+  int? editingIndex;
   bool _isLoading = false;
   bool _hasUnsavedChanges = false;
 
-  // Glossary service (now uses SharedPreferences)
-  final GlossaryService _glossaryService = GlossaryService();
-
-  // Canvas/Drawing controllers
+  final LibraryService _libraryService = LibraryService();
   final GlobalKey _canvasKey = GlobalKey();
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _editController = TextEditingController();
 
-  // Stroke tracking for symbol detection
   List<Stroke> _currentStrokes = [];
   List<Offset> _currentStrokePoints = [];
   DateTime? _currentStrokeStartTime;
@@ -43,38 +36,23 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   @override
   void initState() {
     super.initState();
-    glossaryItem = widget.glossaryItem ??
-        GlossaryItem(id: 'temp', name: 'Glossary');
-    if (widget.glossaryItem != null) _loadEntries();
+    glossaryItem = widget.glossaryItem;
+    _loadEntries();
   }
 
-  /// Load entries from SharedPreferences
   Future<void> _loadEntries() async {
     setState(() => _isLoading = true);
-    
     try {
-      print('[GlossaryScreen] Loading entries for glossary: ${glossaryItem.id}');
-      
-      final entries = await _glossaryService.loadEntries(glossaryItem.id);
-      
+      final entries = await _libraryService.loadEntries(glossaryItem.id);
       if (mounted) {
         setState(() {
           glossaryItem.entries = entries;
           _isLoading = false;
         });
-        
-        print('[GlossaryScreen] Loaded ${entries.length} entries');
-        for (int i = 0; i < entries.length; i++) {
-          print('[GlossaryScreen] Entry ${i}: spanish="${entries[i].spanish}", hasStrokes=${entries[i].strokes != null}, strokeCount=${entries[i].strokes?.length}\n');
-        }
-
       }
     } catch (e) {
-      print('[GlossaryScreen] Failed to load entries: $e');
-      
-      setState(() => _isLoading = false);
-      
       if (mounted) {
+        setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to load entries: $e')),
         );
@@ -82,43 +60,86 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     }
   }
 
-  /// Delete entry (instant UI update, saved to SharedPreferences on Save button)
+  Future<void> _saveAllGlossaryEntries() async {
+    if (!_hasUnsavedChanges) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No changes to save')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      await _libraryService.saveEntries(glossaryItem.id, glossaryItem.entries);
+      setState(() {
+        _isLoading = false;
+        _hasUnsavedChanges = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Glossary saved successfully'), backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save glossary: $e')),
+        );
+      }
+    }
+  }
+
+  void _addNewEntry() {
+    setState(() {
+      glossaryItem.addEntry(GlossaryEntry(
+        english: '',
+        spanish: '',
+        definition: '',
+        synonym: '',
+        strokes: [],
+        symbolImage: null,
+      ));
+      _hasUnsavedChanges = true;
+    });
+
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
   void _deleteEntry(int index) {
     if (index < 0 || index >= glossaryItem.entries.length) return;
-    
     setState(() {
       glossaryItem.deleteEntry(index);
       _hasUnsavedChanges = true;
     });
-    
-    print('[GlossaryScreen] Entry deleted, unsaved changes: true');
   }
 
-  // Canvas/Symbol Methods
   Future<Uint8List?> _captureCanvas() async {
     try {
-      RenderRepaintBoundary boundary =
-          _canvasKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
-      ui.Image image = await boundary.toImage(pixelRatio: 1.0);
-      ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      final boundary = _canvasKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+      final image = await boundary.toImage(pixelRatio: 1.0);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       return byteData?.buffer.asUint8List();
     } catch (e) {
-      debugPrint("[GlossaryScreen] Error capturing canvas: $e");
+      debugPrint("Error capturing canvas: $e");
       return null;
     }
   }
 
   void _saveSymbol() async {
-    Uint8List? imageData = await _captureCanvas();
-
+    final imageData = await _captureCanvas();
     if (editingIndex != null && imageData != null) {
-      final index = editingIndex!;
-      
-      print('[GlossaryScreen] Symbol saved for entry $index, ${_currentStrokes.length} strokes');
-
       setState(() {
-        glossaryItem.entries[index].symbolImage = imageData;
-        glossaryItem.entries[index].strokes = List.from(_currentStrokes);
+        glossaryItem.entries[editingIndex!].symbolImage = imageData;
+        glossaryItem.entries[editingIndex!].strokes = List.from(_currentStrokes);
         showCanvas = false;
         editingIndex = null;
         _currentStrokes.clear();
@@ -126,138 +147,98 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
         _currentStrokeStartTime = null;
         _hasUnsavedChanges = true;
       });
-      
     }
   }
 
-  // Cell Interaction Methods
   void _onCellTap(int rowIndex, int columnIndex) {
+    final entry = glossaryItem.entries[rowIndex];
     if (columnIndex == 4) {
-      // Symbol column
-      final entry = glossaryItem.entries[rowIndex];
-      
-      if (entry.symbolImage != null) {
-        // Show existing symbol
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Current Symbol'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Image.memory(
-                  entry.symbolImage!,
-                  width: 600,
-                  height: 400,
-                  fit: BoxFit.contain,
-                ),
-                const SizedBox(height: 16),
-                if (entry.strokes != null && entry.strokes!.isNotEmpty)
-                  Text(
-                    '${entry.strokes!.length} stroke(s)',
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                const SizedBox(height: 8),
-                const Text(
-                  'What would you like to do?',
-                  style: TextStyle(fontSize: 18),
-                ),
-              ],
-            ),
-            actionsAlignment: MainAxisAlignment.spaceEvenly,
-            actionsPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
+    if (entry.symbolImage != null && entry.symbolImage!.isNotEmpty) {
+      // Show dialog with current symbol
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Current Symbol'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Image.memory(
+                entry.symbolImage!,
+                width: 600,
+                height: 400,
+                fit: BoxFit.contain,
               ),
-              TextButton(
-                onPressed: () {
-                  setState(() {
-                    entry.symbolImage = null;
-                    entry.strokes = null;
-                    _hasUnsavedChanges = true;
-                  });
-                  Navigator.pop(context);
-                },
-                child: const Text('Delete Symbol', style: TextStyle(color: Colors.red)),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  setState(() {
-                    editingIndex = rowIndex;
-                    showCanvas = true;
-                  });
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.black,
+              if (entry.strokes.isNotEmpty)
+                Text(
+                  '${entry.strokes.length} stroke(s)',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
                 ),
-                child: const Text('Replace Drawing'),
-              ),
+              const SizedBox(height: 8),
+              const Text('What would you like to do?', style: TextStyle(fontSize: 18)),
             ],
           ),
-        );
-      } else {
-        // No symbol yet, open canvas
-        setState(() {
-          editingIndex = rowIndex;
-          showCanvas = true;
-        });
-      }
+          actionsAlignment: MainAxisAlignment.spaceEvenly,
+          actionsPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  entry.symbolImage = null; // <-- now properly null
+                  entry.strokes = [];
+                  _hasUnsavedChanges = true;
+                });
+                Navigator.pop(context);
+              },
+              child: const Text('Delete Symbol', style: TextStyle(color: Colors.red)),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                setState(() {
+                  editingIndex = rowIndex;
+                  showCanvas = true;
+                });
+                Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.black,
+              ),
+              child: const Text('Replace Drawing'),
+            ),
+          ],
+        ),
+      );
     } else {
-      // Text field columns
-      String currentValue = '';
-      switch (columnIndex) {
-        case 0:
-          currentValue = glossaryItem.entries[rowIndex].english;
-          break;
-        case 1:
-          currentValue = glossaryItem.entries[rowIndex].spanish;
-          break;
-        case 2:
-          currentValue = glossaryItem.entries[rowIndex].definition;
-          break;
-        case 3:
-          currentValue = glossaryItem.entries[rowIndex].synonym;
-          break;
-      }
-
-      _editController.text = currentValue;
+      // No current symbol, just open canvas
+      setState(() {
+        editingIndex = rowIndex;
+        showCanvas = true;
+      });
+    }
+  } else {
+      _editController.text = [
+        entry.english,
+        entry.spanish,
+        entry.definition,
+        entry.synonym
+      ][columnIndex];
 
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
           title: Text(['English', 'Spanish', 'Definition', 'Synonym'][columnIndex]),
-          content: TextField(
-            controller: _editController,
-            autofocus: true,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-            ),
-          ),
+          content: TextField(controller: _editController, autofocus: true, decoration: const InputDecoration(border: OutlineInputBorder())),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
             ElevatedButton(
               onPressed: () {
                 setState(() {
                   switch (columnIndex) {
-                    case 0:
-                      glossaryItem.entries[rowIndex].english = _editController.text;
-                      break;
-                    case 1:
-                      glossaryItem.entries[rowIndex].spanish = _editController.text;
-                      break;
-                    case 2:
-                      glossaryItem.entries[rowIndex].definition = _editController.text;
-                      break;
-                    case 3:
-                      glossaryItem.entries[rowIndex].synonym = _editController.text;
-                      break;
+                    case 0: entry.english = _editController.text; break;
+                    case 1: entry.spanish = _editController.text; break;
+                    case 2: entry.definition = _editController.text; break;
+                    case 3: entry.synonym = _editController.text; break;
                   }
                   _hasUnsavedChanges = true;
                 });
@@ -271,83 +252,12 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
     }
   }
 
-  /// Add new entry
-  void _addNewEntry() {
-    final newEntry = GlossaryEntry(
-      english: '',
-      spanish: '',
-      definition: '',
-      synonym: '',
-    );
 
-    setState(() {
-      glossaryItem.addEntry(newEntry);
-      _hasUnsavedChanges = true;
-    });
-
-    print('[GlossaryScreen] New entry added, total: ${glossaryItem.entries.length}');
-
-    // Auto-scroll to new entry
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
-    });
-  }
-
-  /// Save all entries to SharedPreferences
-  Future<void> _saveAllGlossaryEntries() async {
-    if (!_hasUnsavedChanges) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No changes to save')),
-      );
-      return;
-    }
-
-    setState(() => _isLoading = true);
-    
-    try {
-      print('[GlossaryScreen] Saving ${glossaryItem.entries.length} entries...');
-      
-      await _glossaryService.saveAllEntries(glossaryItem.id, glossaryItem.entries);
-      
-      setState(() {
-        _isLoading = false;
-        _hasUnsavedChanges = false;
-      });
-      
-      print('[GlossaryScreen] All entries saved successfully');
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Glossary saved successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } catch (e) {
-      print('[GlossaryScreen] Failed to save entries: $e');
-      
-      setState(() => _isLoading = false);
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save glossary: $e')),
-        );
-      }
-    }
-  }
-
-  // Build UI
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
+        debugPrint("GlossaryScreen built: ${glossaryItem.name}");
         if (_hasUnsavedChanges) {
           final discard = await showDialog<bool>(
             context: context,
@@ -355,24 +265,15 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
               title: const Text('Unsaved Changes'),
               content: const Text('You have unsaved changes. Save before leaving?'),
               actions: [
-                TextButton(
-                  child: const Text('Discard'),
-                  onPressed: () => Navigator.of(context).pop(true),
-                ),
-                TextButton(
-                  child: const Text('Cancel'),
-                  onPressed: () => Navigator.of(context).pop(false),
-                ),
+                TextButton(child: const Text('Discard'), onPressed: () => Navigator.of(context).pop(true)),
+                TextButton(child: const Text('Cancel'), onPressed: () => Navigator.of(context).pop(false)),
                 ElevatedButton(
                   child: const Text('Save'),
                   onPressed: () async {
                     await _saveAllGlossaryEntries();
                     Navigator.of(context).pop(true);
                   },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
-                  ),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
                 ),
               ],
             ),
@@ -392,18 +293,8 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                 child: Center(
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.orange,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: const Text(
-                      'Unsaved',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    decoration: BoxDecoration(color: Colors.orange, borderRadius: BorderRadius.circular(4)),
+                    child: const Text('Unsaved', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
                   ),
                 ),
               ),
@@ -415,22 +306,7 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
           ],
         ),
         body: _isLoading
-            ? Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const CircularProgressIndicator(),
-                    const SizedBox(height: 16),
-                    Text(
-                      _hasUnsavedChanges ? 'Saving entries...' : 'Loading entries...',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.grey[600],
-                      ),
-                    ),
-                  ],
-                ),
-              )
+            ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: const [CircularProgressIndicator(), SizedBox(height: 16), Text('Loading entries...', style: TextStyle(fontSize: 16))]))
             : showCanvas
                 ? _buildCanvasView()
                 : _buildTableView(),
@@ -440,7 +316,6 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                 backgroundColor: Colors.black,
                 foregroundColor: Colors.white,
                 child: const Icon(Icons.add),
-                tooltip: 'Add Entry',
               )
             : null,
       ),
@@ -579,9 +454,19 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
           padding: const EdgeInsets.all(8),
           height: 56,
           alignment: Alignment.center,
-          child: entry.symbolImage != null
+          child: (entry.symbolImage != null && entry.symbolImage!.isNotEmpty)
               ? Image.memory(entry.symbolImage!, width: 40, height: 40)
-              : const Icon(Icons.draw, color: Colors.grey),
+              : Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.green),
+                    color: Colors.green[50],
+                  ),
+                  child: const Center(
+                    child: Icon(Icons.add, color: Colors.green),
+                  ),
+                ),
         ),
       ),
     );

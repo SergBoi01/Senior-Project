@@ -1,6 +1,11 @@
+// ------------------------------------------------ //
+//  Classes: NotebookPage, 
+//           NotebookManager
+// ------------------------------------------------ //
+
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'strokes_models.dart';
+import 'strokes_model.dart';
 
 class NotebookPage {
   List<Stroke> strokes;
@@ -38,28 +43,28 @@ class NotebookManager {
 
   // --- PAGE OPERATIONS -------------------------------------------------------
 
-  void newPageAfterCurrent(String userId) {
+  void newPageAfterCurrent() {
     pages.insert(currentIndex + 1, NotebookPage());
     currentIndex++;
-    saveToPrefs(userId);
+    saveToPrefs();
   }
 
-  void nextPage(String userId) {
+  void nextPage() {
     if (currentIndex == pages.length - 1) {
       pages.add(NotebookPage());
     }
     currentIndex++;
-    saveToPrefs(userId);
+    saveToPrefs();
   }
 
-  void prevPage(String userId) {
+  void prevPage() {
     if (currentIndex > 0) {
       currentIndex--;
-      saveToPrefs(userId);
+      saveToPrefs();
     }
   }
 
-  void deleteCurrentPage(String userId) {
+  void deleteCurrentPage() {
     if (pages.isEmpty) return;
 
     deletedPages.insert(0, pages.removeAt(currentIndex));
@@ -71,19 +76,19 @@ class NotebookManager {
       currentIndex = pages.length - 1;
     }
 
-    saveToPrefs(userId);
+    saveToPrefs();
   }
 
-  void restoreLastDeleted(String userId) {
+  void restoreLastDeleted() {
     if (deletedPages.isEmpty) return;
 
     pages.insert(currentIndex, deletedPages.removeAt(0));
-    saveToPrefs(userId);
+    saveToPrefs();
   }
 
   // --- SHARED PREFERENCES STORAGE ------------------------------------------
 
-  Future<void> saveToPrefs(String userId) async {
+  Future<void> saveToPrefs() async {
     final prefs = await SharedPreferences.getInstance();
 
     final data = {
@@ -92,14 +97,14 @@ class NotebookManager {
     };
 
     await prefs.setString(
-      'user_${userId}_notebook',
+      'user__notebook',
       jsonEncode(data),
     );
   }
 
-  Future<void> loadFromPrefs(String userId) async {
+  Future<void> loadFromPrefs( ) async {
     final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString('user_${userId}_notebook');
+    final saved = prefs.getString('user_notebook');
 
     if (saved == null) {
       pages = [NotebookPage()];
