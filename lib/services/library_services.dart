@@ -56,6 +56,15 @@ class LibraryService {
     return list.map((e) => GlossaryEntry.fromJson(e)).toList();
   }
 
+  Future<void> saveEntries(String glossaryId, List<GlossaryEntry> entries) async {
+    final prefs = await _prefs;
+    await prefs.setString(
+      'glossary_entries_$glossaryId',
+      jsonEncode(entries.map((e) => e.toJson()).toList()),
+    );
+    print("[LibraryService] Saved ${entries.length} entries for $glossaryId");
+  }
+
   Future<void> updateGlossaryChecked(GlossaryItem glossary, bool isChecked) async {
     glossary.isChecked = isChecked;
     if (isChecked) {
@@ -77,5 +86,13 @@ class LibraryService {
   Future<void> loadChildrenForFolder(FolderItem folder) async {
     if (folder.childrenLoaded) return;
     folder.childrenLoaded = true;
+  }
+
+  Future<void> saveFolderChildren(FolderItem folder) async {
+    final prefs = await _prefs;
+    await prefs.setString(
+      'folder_${folder.id}',
+      jsonEncode(folder.children.map((c) => c.toJson()).toList()),
+    );
   }
 }
