@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/library_models.dart';
 import '../widgets/library_item_card.dart';
+import '../services/library_storage.dart';
 import 'glossary_screen.dart';
 import 'csv_column_mapping_screen.dart';
 import 'dart:math';
@@ -26,10 +27,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
   static const Color subtleText = Color(0xFF6B6B6B);
 
   // Root level storage - only folders (glossaries are inside folders)
-  final List<FolderItem> _rootFolders = [];
+  List<FolderItem> _rootFolders = [];
 
   // Folder navigation stack to track current location
   final List<FolderItem> _folderStack = [];
+  
+  // Loading state
+  bool _isLoading = true;
 
   // Get current folder (null if at root)
   FolderItem? get _currentFolder => _folderStack.isEmpty ? null : _folderStack.last;
@@ -48,10 +52,40 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   void initState() {
     super.initState();
-    // If navigating into a specific folder, set up the stack
-    if (widget.initialFolder != null) {
-      _folderStack.add(widget.initialFolder!);
+    _loadData();
+  }
+
+  // Load data from SharedPreferences
+  Future<void> _loadData() async {
+    final folders = await LibraryStorage.loadFolders();
+    setState(() {
+      _rootFolders = folders;
+      _isLoading = false;
+      
+      // If navigating into a specific folder, find it in loaded data
+      if (widget.initialFolder != null) {
+        // Find the folder in the loaded data by ID
+        final folder = _findFolderById(widget.initialFolder!.id, _rootFolders);
+        if (folder != null) {
+          _folderStack.add(folder);
+        }
+      }
+    });
+  }
+
+  // Find a folder by ID recursively
+  FolderItem? _findFolderById(String id, List<FolderItem> folders) {
+    for (final folder in folders) {
+      if (folder.id == id) return folder;
+      final found = _findFolderById(id, folder.folders);
+      if (found != null) return found;
     }
+    return null;
+  }
+
+  // Save data to SharedPreferences
+  Future<void> _saveData() async {
+    await LibraryStorage.saveFolders(_rootFolders);
   }
 
   // Generate unique ID
@@ -194,6 +228,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             }
                           });
                           
+                          _saveData(); // Persist changes
                           Navigator.pop(context);
                         }
                       },
@@ -370,6 +405,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           _currentFolder!.addChild(glossary);
                         });
                         
+                        _saveData(); // Persist changes
                         Navigator.pop(context);
                       },
                       style: ElevatedButton.styleFrom(
@@ -462,6 +498,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           _currentFolder!.addChild(glossary);
         });
         
+        _saveData(); // Persist changes
         _showStyledSnackBar('Successfully imported ${glossary.entries.length} entries', isError: false);
       }
     } catch (e) {
@@ -732,6 +769,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           setState(() {
                             item.name = nameController.text.trim();
                           });
+                          _saveData(); // Persist changes
                           Navigator.pop(context);
                         }
                       },
@@ -887,6 +925,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       }
     });
 
+    _saveData(); // Persist changes
     _showStyledSnackBar('${item.name} deleted', isError: false);
   }
 
@@ -895,21 +934,24 @@ class _LibraryScreenState extends State<LibraryScreen> {
     setState(() {
       item.isChecked = newValue;
     });
+    _saveData(); // Persist changes
   }
 
   // Handle item tap
-  void _handleItemTap(dynamic item) {
+  void _handleItemTap(dynamic item) async {
     if (item is FolderItem) {
       // Navigate into folder
       _navigateToFolder(item);
     } else if (item is GlossaryItem) {
-      // Navigate to GlossaryScreen
-      Navigator.push(
+      // Navigate to GlossaryScreen and save when returning
+      await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => GlossaryScreen(glossaryItem: item),
         ),
       );
+      // Save any changes made in the glossary screen
+      _saveData();
     }
   }
 
@@ -941,7 +983,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
           onPressed: _navigateBack,
         ),
       ),
-      body: Column(
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: primaryGreen))
+          : Column(
         children: [
           // Cards section - show folders and glossaries
           if (_currentItems.isNotEmpty)
