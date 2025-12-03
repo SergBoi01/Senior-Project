@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import 'login_screen.dart';
 import 'symbols_screen.dart';
@@ -10,6 +11,7 @@ import 'package:senior_project/models/notebook_model.dart';
 import 'package:senior_project/models/library_model.dart';
 import 'package:senior_project/models/strokes_model.dart';
 import 'package:senior_project/services/backend_manager.dart';
+import 'package:senior_project/widgets/lined_paper_widget.dart';
 
 import 'dart:math' as math;
 
@@ -39,6 +41,24 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   DateTime? currentStrokeStartTime;
   
   late AnimationController _animationController;
+
+  // Transcript lines
+  List<String> transcriptLines = [];
+  bool isMuted = false;
+
+  // Get user's display name
+  String get _userName {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      if (user.displayName != null && user.displayName!.isNotEmpty) {
+        return user.displayName!;
+      } else if (user.email != null) {
+        // Extract name from email (part before @)
+        return user.email!.split('@')[0];
+      }
+    }
+    return 'User';
+  }
 
   // ==================== HELPER METHODS ====================
   List<GlossaryItem> _getCheckedGlossaries() {
@@ -488,14 +508,18 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
   @override
   Widget build(BuildContext context) {    
     return Scaffold(
-      backgroundColor: Colors.grey[500],
+      backgroundColor: Colors.grey[300],
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: Colors.grey[300],
         elevation: 0,
         automaticallyImplyLeading: false,
         title: Text(
-          "Strokes: ${notebook.currentPage.strokes.length} | Symbols: ${detectedSymbols.length}", 
-          style: const TextStyle(color: Colors.black, fontSize: 14),
+          'Hello, $_userName!',
+          style: TextStyle(
+            color: Colors.black,
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         leading: Builder(
           builder: (context) => IconButton(
@@ -628,20 +652,32 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                 elevation: 4,
                 child: Column(
                   children: [
+                    
                     // Canvas
                     Expanded(
-                      child: GestureDetector(
-                        onPanStart: _onPanStart,
-                        onPanUpdate: _onPanUpdate,
-                        onPanEnd: _onPanEnd,
-                        child: SizedBox.expand(
-                          child: CustomPaint(
-                            painter: CanvasPainter(
-                              strokes: notebook.currentPage.strokes,
-                              currentStroke: currentStrokePoints,
+                      child: Stack(
+                        children: [
+                          // Lined paper background
+                          CustomPaint(
+                            painter: LinedPaperPainter(),
+                            child: Container(), // required to give it size
+                          ),
+
+                          // Your existing canvas on top
+                          GestureDetector(
+                            onPanStart: _onPanStart,
+                            onPanUpdate: _onPanUpdate,
+                            onPanEnd: _onPanEnd,
+                            child: SizedBox.expand(
+                              child: CustomPaint(
+                                painter: CanvasPainter(
+                                  strokes: notebook.currentPage.strokes,
+                                  currentStroke: currentStrokePoints,
+                                ),
+                              ),
                             ),
                           ),
-                        ),
+                        ],
                       ),
                     ),
 
@@ -688,7 +724,6 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
                       ),
                     ),
 
-
                     // Canvas Edit Buttons
                     Padding(
                       padding: const EdgeInsets.all(12.0),
@@ -719,44 +754,62 @@ class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin
             
             const VerticalDivider(width: 1, color: Colors.grey),
             
-            // Right side - spatial visualization
+            // Right side - transcript
             Expanded(
               flex: 50,
-              child: Container(
-                color: Colors.grey[400],
-                child: Column(
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.all(8.0),
-                      child: Text(
-                        'Detected Symbols',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Transcript Header
+                  Container(
+                    width: double.infinity,
+                    padding: EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.green,
+                      borderRadius: BorderRadius.only(
+                        topRight: Radius.circular(12),
                       ),
                     ),
-                    Expanded(
-                      child: detectedSymbols.isEmpty
-                        ? const Center(
-                            child: Text(
-                              'Draw symbols to see\nthem detected here',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: Colors.grey),
-                            ),
-                          )
-                        : DetectionVisualizer(
-                            detectedSymbols: detectedSymbols,
-                            canvasSize: Size(
-                              MediaQuery.of(context).size.width * 0.6,
-                              MediaQuery.of(context).size.height - 200,
-                            ),
-                            onSymbolTap: (symbol) {
-                              _showCorrectionDialog(symbol);
-                            },
-                          ),
+                    child: Text(
+                      'Transcript',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ],
-                ),
+                  ),
+
+                  // Transcript Content
+                  Expanded(
+                    child: Container(
+                      padding: EdgeInsets.all(16),
+                      child: detectedSymbols.isEmpty
+                          ? Center(
+                              child: Text(
+                                'Draw symbols to see\nthem detected here',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 14,
+                                ),
+                              ),
+                            )
+                          : DetectionVisualizer(
+                              detectedSymbols: detectedSymbols,
+                              canvasSize: Size(
+                                MediaQuery.of(context).size.width * 0.6,
+                                MediaQuery.of(context).size.height - 200,
+                              ),
+                              onSymbolTap: (symbol) {
+                                _showCorrectionDialog(symbol);
+                              },
+                            ),
+                    ),
+                  ),
+                ],
               ),
-            ),
+            )
           ],
         ),
       ),
