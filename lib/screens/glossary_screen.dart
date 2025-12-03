@@ -168,9 +168,9 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
                 height: 400,
                 fit: BoxFit.contain,
               ),
-              if (entry.strokes.isNotEmpty)
+              if (entry.strokes != null)
                 Text(
-                  '${entry.strokes.length} stroke(s)',
+                  '${entry.strokes?.length} stroke(s)',
                   style: const TextStyle(fontSize: 12, color: Colors.grey),
                 ),
               const SizedBox(height: 8),

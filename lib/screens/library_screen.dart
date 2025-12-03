@@ -1,4 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:csv/csv.dart';
+import 'dart:convert';
+
+
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:math';
 
@@ -6,6 +11,8 @@ import '../models/library_model.dart';
 import '../widgets/library_item_card_widget.dart';
 import '../services/library_services.dart';
 import 'glossary_screen.dart';
+import 'csv_column_mapping_screen.dart';
+
 
 class LibraryScreen extends StatefulWidget {
 
@@ -16,6 +23,13 @@ class LibraryScreen extends StatefulWidget {
 }
 
 class _LibraryScreenState extends State<LibraryScreen> {
+  // Design colors matching the CSV import screen
+  static const Color primaryGreen = Color(0xFF5B8A51);
+  static const Color backgroundColor = Color(0xFFE8E8E8);
+  static const Color cardColor = Colors.white;
+  static const Color darkText = Color(0xFF2D2D2D);
+  static const Color subtleText = Color(0xFF6B6B6B);
+  
   List<FolderItem> _rootFolders = [];
   final List<FolderItem> _folderStack = [];
 
@@ -32,7 +46,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   void initState() {
     super.initState();
     
-      _loadLibrary();
+    _loadLibrary();
     
   }
 
@@ -110,69 +124,164 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   void _createFolder() {
     final TextEditingController nameController = TextEditingController();
+    final bool isSubfolder = _currentFolder != null;
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(_currentFolder == null ? 'Create Folder' : 'Create Subfolder'),
-        content: TextField(
-          controller: nameController,
-          autofocus: true,
-          decoration: InputDecoration(
-            labelText: _currentFolder == null ? 'Folder Name' : 'Subfolder Name',
-            border: const OutlineInputBorder(),
-            hintText: 'Enter a name...',
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: cardColor,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header with icon
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: primaryGreen.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      Icons.create_new_folder_outlined,
+                      color: primaryGreen,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    isSubfolder ? 'Create Subfolder' : 'Create Folder',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: darkText,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              
+              // Text field
+              TextField(
+                controller: nameController,
+                autofocus: true,
+                style: const TextStyle(fontSize: 16, color: darkText),
+                decoration: InputDecoration(
+                  hintText: isSubfolder ? 'Subfolder Name' : 'Folder Name',
+                  hintStyle: TextStyle(color: Colors.grey.shade400),
+                  filled: true,
+                  fillColor: backgroundColor,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: primaryGreen, width: 2),
+                  ),
+                  prefixIcon: Icon(
+                    Icons.folder_outlined,
+                    color: subtleText,
+                    size: 20,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                ),
+              ),
+              const SizedBox(height: 24),
+              
+              // Action buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(color: Colors.grey.shade300),
+                        ),
+                      ),
+                      child: Text(
+                        'Cancel',
+                        style: TextStyle(
+                          color: subtleText,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        if (nameController.text.trim().isNotEmpty) {
+                          final folder = FolderItem(
+                            id: _generateId(),
+                            name: nameController.text.trim(),
+                            parentId: _currentFolder?.id,
+                          );
+                          
+                          setState(() {
+                            if (_currentFolder == null) {
+                              _rootFolders.add(folder);
+                            } else {
+                              _currentFolder!.addChild(folder);
+                            }
+                          });
+                          
+                          _saveLibrary(); // Persist changes
+                          Navigator.pop(context);
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primaryGreen,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Create',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () async {
-              final name = nameController.text.trim();
-              if (name.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please enter a name')),
-                );
-                return;
-              }
-
-              final folder = FolderItem(
-                id: _generateId(),
-                name: name,
-                parentId: _currentFolder?.id,
-              );
-
-              setState(() {
-                if (_currentFolder == null) {
-                  _rootFolders.add(folder);
-                } else {
-                  _currentFolder!.addChild(folder);
-                }
-              });
-
-              await _saveLibrary();
-
-              final prefs = await SharedPreferences.getInstance();
-              final str = prefs.getString('libraryRootFolders');
-
-              debugPrint('Saved library: $str');
-              debugPrint('Library saved: ${prefs.getString('libraryRootFolders')}');
-
-              Navigator.pop(context);
-              
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-            child: const Text('Create'),
-          ),
-        ],
       ),
     );
   }
 
   void _createGlossary() {
+    // Can't create glossary at root - must be inside a folder
     if (_currentFolder == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Glossaries must be inside a folder')),
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.info_outline, color: Colors.white, size: 20),
+              const SizedBox(width: 12),
+              Text('Glossaries must be created inside a folder'),
+            ],
+          ),
+          backgroundColor: Colors.orange,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          margin: const EdgeInsets.all(16),
+        ),
       );
       return;
     }
@@ -181,128 +290,651 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Create Glossary'),
-        content: TextField(
-          controller: nameController,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Glossary Name *',
-            border: OutlineInputBorder(),
-            hintText: 'Enter a name...',
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: cardColor,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header with icon
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: primaryGreen.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      Icons.book_outlined,
+                      color: primaryGreen,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Text(
+                    'Create Glossary',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: darkText,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              
+              // Text field
+              TextField(
+                controller: nameController,
+                autofocus: true,
+                style: const TextStyle(fontSize: 16, color: darkText),
+                decoration: InputDecoration(
+                  hintText: 'Glossary Name *',
+                  hintStyle: TextStyle(color: Colors.grey.shade400),
+                  filled: true,
+                  fillColor: backgroundColor,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: primaryGreen, width: 2),
+                  ),
+                  prefixIcon: Icon(
+                    Icons.edit_outlined,
+                    color: subtleText,
+                    size: 20,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                ),
+              ),
+              const SizedBox(height: 24),
+              
+              // Action buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(color: Colors.grey.shade300),
+                        ),
+                      ),
+                      child: Text(
+                        'Cancel',
+                        style: TextStyle(
+                          color: subtleText,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        if (nameController.text.trim().isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Row(
+                                children: [
+                                  Icon(Icons.error_outline, color: Colors.white, size: 20),
+                                  const SizedBox(width: 12),
+                                  Text('Please enter a glossary name'),
+                                ],
+                              ),
+                              backgroundColor: Colors.red.shade400,
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              margin: const EdgeInsets.all(16),
+                            ),
+                          );
+                          return;
+                        }
+                        
+                        final glossary = GlossaryItem(
+                          id: _generateId(),
+                          name: nameController.text.trim(),
+                          parentId: _currentFolder!.id,
+                        );
+                        
+                        setState(() {
+                          _currentFolder!.addChild(glossary);
+                        });
+                        
+                        _saveLibrary(); // Persist changes
+                        Navigator.pop(context);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primaryGreen,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Create',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () async {
-              final name = nameController.text.trim();
-              if (name.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please enter a glossary name')),
-                );
-                return;
-              }
+      ),
+    );  
+  }
 
-              final glossary = GlossaryItem(
-                id: _generateId(),
-                name: name,
-                parentId: _currentFolder!.id,
-              );
+  // Import glossary from CSV file
+  Future<void> _importFromCSV() async {
+    // Can't import at root - must be inside a folder
+    if (_currentFolder == null) {
+      _showStyledSnackBar('CSV files must be imported inside a folder', isError: false, isWarning: true);
+      return;
+    }
 
-              setState(() => _currentFolder!.addChild(glossary));
-              Navigator.pop(context);
-              await _saveLibrary();
+    try {
+      // Pick CSV file
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['csv'],
+        withData: true,
+      );
 
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                      content: Text('Glossary created. Add entries inside.')),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-            child: const Text('Create'),
+      if (result == null || result.files.isEmpty) {
+        // User canceled the picker
+        return;
+      }
+
+      final file = result.files.first;
+      
+      if (file.bytes == null) {
+        _showStyledSnackBar('Could not read file', isError: true);
+        return;
+      }
+
+      // Check file size (limit to 5MB for performance)
+      const int maxFileSizeBytes = 5 * 1024 * 1024; // 5MB
+      if (file.bytes!.length > maxFileSizeBytes) {
+        _showStyledSnackBar('File is too large. Maximum size is 5MB', isError: true);
+        return;
+      }
+
+      // Parse CSV
+      String csvString = utf8.decode(file.bytes!);
+      List<List<dynamic>> csvData = const CsvToListConverter().convert(csvString);
+
+      if (csvData.isEmpty) {
+        _showStyledSnackBar('CSV file is empty', isError: true);
+        return;
+      }
+
+      if (csvData.length < 2) {
+        _showStyledSnackBar('CSV must have at least a header row and one data row', isError: true);
+        return;
+      }
+
+      // Navigate to column mapping screen
+      final glossary = await Navigator.push<GlossaryItem>(
+        context,
+        MaterialPageRoute(
+          builder: (context) => CsvColumnMappingScreen(
+            csvData: csvData,
+            parentFolderId: _currentFolder!.id,
           ),
-        ],
+        ),
+      );
+
+      // If glossary was created, add it to current folder
+      if (glossary != null) {
+        setState(() {
+          _currentFolder!.addChild(glossary);
+        });
+        
+        _saveLibrary(); // Persist changes
+        _showStyledSnackBar('Successfully imported ${glossary.entries.length} entries', isError: false);
+      }
+    } catch (e) {
+      _showStyledSnackBar('Error importing CSV: ${e.toString()}', isError: true);
+    }
+  }
+
+  void _showStyledSnackBar(String message, {bool isError = false, bool isWarning = false}) {
+    Color bgColor;
+    IconData icon;
+    
+    if (isError) {
+      bgColor = Colors.red.shade400;
+      icon = Icons.error_outline;
+    } else if (isWarning) {
+      bgColor = Colors.orange;
+      icon = Icons.info_outline;
+    } else {
+      bgColor = primaryGreen;
+      icon = Icons.check_circle_outline;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(icon, color: Colors.white, size: 20),
+            const SizedBox(width: 12),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: bgColor,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(16),
       ),
     );
   }
 
+  // Show dialog to choose between folder and glossary
   void _showCreateDialog() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Create New'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.folder, color: Colors.orange),
-              title: Text(_currentFolder == null ? 'Folder' : 'Subfolder'),
-              subtitle: Text(_currentFolder == null ? 'Organize your glossaries' : 'Create a subfolder'),
-              onTap: () {
-                Navigator.pop(context);
-                _createFolder();
-              },
-            ),
-            if (_currentFolder != null)
-              ListTile(
-                leading: const Icon(Icons.book, color: Colors.blue),
-                title: const Text('Glossary'),
-                subtitle: const Text('Add words and symbols'),
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: cardColor,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              const Text(
+                'Create New',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: darkText,
+                ),
+              ),
+              const SizedBox(height: 20),
+              
+              // Subfolder option
+              _buildCreateOption(
+                icon: Icons.folder_copy_outlined,
+                label: 'Subfolder',
+                color: Colors.amber[700]!,
+                onTap: () {
+                  Navigator.pop(context);
+                  _createFolder();
+                },
+              ),
+              const SizedBox(height: 12),
+              
+              // Glossary option
+              _buildCreateOption(
+                icon: Icons.book_outlined,
+                label: 'Glossary',
+                color: Colors.blue[700]!,
                 onTap: () {
                   Navigator.pop(context);
                   _createGlossary();
                 },
               ),
-          ],
+              const SizedBox(height: 12),
+              
+              // Import from CSV option
+              _buildCreateOption(
+                icon: Icons.upload_file_outlined,
+                label: 'Import from CSV',
+                color: primaryGreen,
+                onTap: () {
+                  Navigator.pop(context);
+                  _importFromCSV();
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
+  Widget _buildCreateOption({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: backgroundColor,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, color: color, size: 22),
+              ),
+              const SizedBox(width: 14),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                  color: darkText,
+                ),
+              ),
+              const Spacer(),
+              Icon(Icons.chevron_right, color: subtleText, size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Rename item
   void _renameItem(dynamic item) {
     final TextEditingController nameController = TextEditingController(text: item.name);
+    
+    // Determine item type
+    String itemType;
+    IconData itemIcon;
+    Color itemColor;
+    if (item is FolderItem) {
+      itemType = item.parentId != null ? "Subfolder" : "Folder";
+      itemIcon = item.parentId != null ? Icons.folder_copy_outlined : Icons.folder_outlined;
+      itemColor = Colors.amber[700]!;
+    } else {
+      itemType = "Glossary";
+      itemIcon = Icons.book_outlined;
+      itemColor = Colors.blue[700]!;
+    }
+    
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: cardColor,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header with icon
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: itemColor.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      itemIcon,
+                      color: itemColor,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Rename $itemType',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: darkText,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              
+              // Text field
+              TextField(
+                controller: nameController,
+                autofocus: true,
+                style: const TextStyle(fontSize: 16, color: darkText),
+                decoration: InputDecoration(
+                  hintText: 'Name',
+                  hintStyle: TextStyle(color: Colors.grey.shade400),
+                  filled: true,
+                  fillColor: backgroundColor,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: itemColor, width: 2),
+                  ),
+                  prefixIcon: Icon(
+                    Icons.edit_outlined,
+                    color: subtleText,
+                    size: 20,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                ),
+              ),
+              const SizedBox(height: 24),
+              
+              // Action buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(color: Colors.grey.shade300),
+                        ),
+                      ),
+                      child: Text(
+                        'Cancel',
+                        style: TextStyle(
+                          color: subtleText,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        if (nameController.text.trim().isNotEmpty) {
+                          setState(() {
+                            item.name = nameController.text.trim();
+                          });
+                          _saveLibrary(); // Persist changes
+                          Navigator.pop(context);
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primaryGreen,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Save',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Delete item
+  void _deleteItem(dynamic item) {
+    final String itemName = item.name;
+    
+    // Determine item type
+    String itemType;
+    if (item is FolderItem) {
+      itemType = item.parentId != null ? "Subfolder" : "Folder";
+    } else {
+      itemType = "Glossary";
+    }
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Rename ${item is FolderItem ? "Folder" : "Glossary"}'),
-        content: TextField(
-          controller: nameController,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Name',
-            border: OutlineInputBorder(),
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: cardColor,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Warning icon
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.delete_forever,
+                  color: Colors.red[400],
+                  size: 40,
+                ),
+              ),
+              const SizedBox(height: 20),
+              
+              // Title
+              Text(
+                'Delete $itemType?',
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: darkText,
+                ),
+              ),
+              const SizedBox(height: 12),
+              
+              // Message
+              Text(
+                'You are about to delete "$itemName" and all of its children, are you sure?',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: subtleText,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 24),
+              
+              // Buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(color: Colors.grey.shade300),
+                        ),
+                      ),
+                      child: Text(
+                        'Cancel',
+                        style: TextStyle(
+                          color: subtleText,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _performDelete(item);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red[400],
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Delete',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () async {
-              final newName = nameController.text.trim();
-              if (newName.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please enter a name')),
-                );
-                return;
-              }
-              setState(() => item.name = newName);
-              Navigator.pop(context);
-
-              if (item is FolderItem) {
-                await _saveLibrary();
-              } else if (item is GlossaryItem) {
-                await _saveLibrary();
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-            child: const Text('Save'),
-          ),
-        ],
       ),
     );
+  }
+
+  // Actually perform the deletion
+  void _performDelete(dynamic item) {
+    setState(() {
+      if (_currentFolder == null) {
+        // At root level - remove from root folders
+        _rootFolders.removeWhere((folder) => folder.id == item.id);
+      } else {
+        // Inside a folder - remove from current folder's children
+        _currentFolder!.children.removeWhere((child) => child.id == item.id);
+      }
+    });
+
+    _saveLibrary(); // Persist changes
+    _showStyledSnackBar('${item.name} deleted', isError: false);
   }
 
   void _toggleCheckbox(dynamic item, bool newValue) async {
@@ -330,29 +962,40 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
 
-  Future<void> _handleItemTap(dynamic item) async {
+  // Handle item tap
+  void _handleItemTap(dynamic item) async {
     if (item is FolderItem) {
+      // Navigate into folder
       _navigateToFolder(item);
     } else if (item is GlossaryItem) {
-      debugPrint('[LibraryScreen] Opening glossary: ${item.name}');
+      // Navigate to GlossaryScreen and save when returning
       await Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => GlossaryScreen(glossaryItem: item)),
+        MaterialPageRoute(
+          builder: (context) => GlossaryScreen(glossaryItem: item),
+        ),
       );
+      // Save any changes made in the glossary screen
+      _saveLibrary();
     }
   }
 
-  String _buildBreadcrumb() =>
-      _folderStack.isEmpty ? 'Library' : _folderStack.map((f) => f.name).join(' / ');
+  // Build breadcrumb
+  String _buildBreadcrumb() {
+    if (_folderStack.isEmpty) {
+      return 'Library';
+    }
+    return _folderStack.map((f) => f.name).join(' / ');
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[300],
+      backgroundColor: backgroundColor,
       appBar: AppBar(
         title: Text(
           _buildBreadcrumb(),
-          style: const TextStyle(
+          style: TextStyle(
             color: Colors.black,
             fontWeight: FontWeight.bold,
             fontSize: 20,
@@ -361,71 +1004,94 @@ class _LibraryScreenState extends State<LibraryScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
+          icon: Icon(Icons.arrow_back, color: Colors.black),
           onPressed: _navigateBack,
-          tooltip: 'Back',
         ),
       ),
       body: _isLoading
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const CircularProgressIndicator(),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Loading library...',
-                    style: TextStyle(fontSize: 16, color: Colors.grey[600]),
-                  ),
-                ],
+          ? const Center(child: CircularProgressIndicator(color: primaryGreen))
+          : Column(
+        children: [
+          // Cards section - show folders and glossaries
+          if (_currentItems.isNotEmpty)
+            Expanded(
+              child: GridView.builder(
+                padding: EdgeInsets.all(16),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing: 16,
+                  childAspectRatio: 1.2,
+                ),
+                itemCount: _currentItems.length,
+                itemBuilder: (context, index) {
+                  final item = _currentItems[index];
+                  return LibraryItemCard(
+                    item: item,
+                    onTap: () => _handleItemTap(item),
+                    onRename: () => _renameItem(item),
+                    onDelete: () => _deleteItem(item),
+                    onCheckboxChanged: (value) => _toggleCheckbox(item, value),
+                  );
+                },
               ),
             )
-          : _currentItems.isNotEmpty
-              ? GridView.builder(
-                  padding: const EdgeInsets.all(16),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 16,
-                    mainAxisSpacing: 16,
-                    childAspectRatio: 1.2,
-                  ),
-                  itemCount: _currentItems.length,
-                  itemBuilder: (context, index) {
-                    final item = _currentItems[index];
-                    return LibraryItemCard(
-                      item: item,
-                      onTap: () => _handleItemTap(item),
-                      onRename: () => _renameItem(item),
-                      onCheckboxChanged: (value) => _toggleCheckbox(item, value),
-                    );
-                  },
-                )
-              : Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.folder_open, size: 64, color: Colors.grey[600]),
-                      const SizedBox(height: 16),
-                      Text(
-                        _currentFolder == null
-                            ? 'No folders yet'
-                            : 'No subfolders or glossaries yet',
-                        style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+          else
+            Expanded(
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        shape: BoxShape.circle,
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Tap the + button to create',
-                        style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+                      child: Icon(
+                        Icons.folder_open_outlined,
+                        size: 48,
+                        color: subtleText,
                       ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      _currentFolder == null
+                          ? 'No folders yet'
+                          : 'No subfolders or glossaries yet',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: darkText,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Tap the + button to create',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: subtleText,
+                      ),
+                    ),
+                  ],
                 ),
+              ),
+            ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _currentFolder == null ? _createFolder : _showCreateDialog,
-        backgroundColor: Colors.green,
+        onPressed: () {
+          if (_currentFolder == null) {
+            // At root: go straight to folder creation
+            _createFolder();
+          } else {
+            // Inside folder: show dialog to choose between subfolder or glossary
+            _showCreateDialog();
+          }
+        },
+        backgroundColor: primaryGreen,
         foregroundColor: Colors.white,
-        child: const Icon(Icons.add),
-        tooltip: _currentFolder == null ? 'Create Folder' : 'Create New',
+        child: Icon(Icons.add),
       ),
     );
   }

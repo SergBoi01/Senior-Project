@@ -11,7 +11,7 @@ class GlossaryEntry {
   String definition;
   String synonym;
   Uint8List? symbolImage;
-  List<Stroke> strokes;
+  List<Stroke>? strokes;
 
   GlossaryEntry({
     this.id,
@@ -20,7 +20,7 @@ class GlossaryEntry {
     required this.definition,
     required this.synonym,
     this.symbolImage,
-    required this.strokes,
+    this.strokes,
   });
 
   GlossaryEntry.short({required String word})
@@ -39,7 +39,7 @@ class GlossaryEntry {
       'spanish': spanish,
       'definition': definition,
       'synonym': synonym,
-      'strokes': strokes.map((s) => s.toJson()).toList(),
+      'strokes': strokes?.map((s) => s.toJson()).toList() ?? [],
       // write nullable base64 string or null
       'symbolImage': symbolImage != null ? base64Encode(symbolImage!) : null,
     };
@@ -55,8 +55,8 @@ class GlossaryEntry {
       synonym: json['synonym'] ?? '',
       strokes: (json['strokes'] as List<dynamic>?)
               ?.map((s) => Stroke.fromJson(s))
-              .toList() ??
-          [],
+              .toList(),
+              
       // decode to Uint8List?; leave null if no image
       symbolImage: json['symbolImage'] != null
           ? base64Decode(json['symbolImage'])
