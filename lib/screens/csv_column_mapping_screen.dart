@@ -1,6 +1,17 @@
 import 'package:flutter/material.dart';
 import '../models/library_models.dart';
 
+// =============================================================================
+// CSV COLUMN MAPPING SCREEN
+// =============================================================================
+
+/// Screen for mapping CSV columns to glossary fields during import.
+/// 
+/// Allows users to:
+/// - Name their new glossary
+/// - Map CSV columns to English, Spanish, Definition, Synonym, or Ignore
+/// - Preview the data before importing
+/// - Handle duplicate entries
 class CsvColumnMappingScreen extends StatefulWidget {
   final List<List<dynamic>> csvData;
   final String? parentFolderId;
@@ -16,17 +27,18 @@ class CsvColumnMappingScreen extends StatefulWidget {
 }
 
 class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
-  late List<String?> columnMappings;
-  final TextEditingController _glossaryNameController = TextEditingController();
-  
-  // Design colors matching the app theme
+  // ===========================================================================
+  // CONSTANTS
+  // ===========================================================================
+
   static const Color primaryGreen = Color(0xFF5B8A51);
   static const Color backgroundColor = Color(0xFFE8E8E8);
   static const Color cardColor = Colors.white;
   static const Color darkText = Color(0xFF2D2D2D);
   static const Color subtleText = Color(0xFF6B6B6B);
 
-  final List<String> mappingOptions = [
+  /// Available mapping options for CSV columns.
+  static const List<String> mappingOptions = [
     'Ignore',
     'English',
     'Spanish',
@@ -34,27 +46,24 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
     'Synonym',
   ];
 
-  // Icons for each mapping option
-  IconData _getMappingIcon(String mapping) {
-    switch (mapping) {
-      case 'Ignore':
-        return Icons.block_outlined;
-      case 'English':
-        return Icons.translate;
-      case 'Spanish':
-        return Icons.language;
-      case 'Definition':
-        return Icons.menu_book_outlined;
-      case 'Synonym':
-        return Icons.swap_horiz;
-      default:
-        return Icons.help_outline;
-    }
-  }
+  // ===========================================================================
+  // STATE
+  // ===========================================================================
+
+  /// Mapping for each column index -> field name.
+  late List<String?> columnMappings;
+
+  /// Controller for glossary name input.
+  final TextEditingController _glossaryNameController = TextEditingController();
+
+  // ===========================================================================
+  // LIFECYCLE
+  // ===========================================================================
 
   @override
   void initState() {
     super.initState();
+    // Initialize all columns to 'Ignore' by default
     if (widget.csvData.isNotEmpty) {
       columnMappings = List.filled(widget.csvData[0].length, 'Ignore');
     } else {
@@ -62,10 +71,22 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
     }
   }
 
+  @override
+  void dispose() {
+    _glossaryNameController.dispose();
+    super.dispose();
+  }
+
+  // ===========================================================================
+  // VALIDATION
+  // ===========================================================================
+
+  /// Returns true if at least one column is mapped (not Ignore).
   bool get _isValidMapping {
     return columnMappings.any((mapping) => mapping != null && mapping != 'Ignore');
   }
 
+  /// Checks if a mapping is already used by another column.
   bool _isMappingUsed(String mapping, int currentIndex) {
     if (mapping == 'Ignore') return false;
     for (int i = 0; i < columnMappings.length; i++) {
@@ -76,21 +97,75 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
     return false;
   }
 
-  String _buildEntryDisplayString(GlossaryEntry entry) {
-    List<String> parts = [];
-    if (entry.english.isNotEmpty) parts.add(entry.english);
-    if (entry.spanish.isNotEmpty) parts.add(entry.spanish);
-    if (entry.definition.isNotEmpty) parts.add(entry.definition);
-    if (entry.synonym.isNotEmpty) parts.add(entry.synonym);
-    return parts.isEmpty ? '(empty)' : parts.join(' / ');
+  // ===========================================================================
+  // DATA PROCESSING
+  // ===========================================================================
+
+  /// Safely retrieves a cell value, handling missing columns.
+  String _safeGetCell(List<dynamic> row, int columnIndex) {
+    if (columnIndex < 0 || columnIndex >= row.length) {
+      return '';
+    }
+    final value = row[columnIndex];
+    if (value == null) {
+      return '';
+    }
+    return value.toString().trim();
   }
 
+  /// Builds glossary entries from the CSV data using current mappings.
+  List<GlossaryEntry> _buildEntriesFromMapping() {
+    List<GlossaryEntry> entries = [];
+
+    // Find column indices for each field
+    int englishCol = columnMappings.indexOf('English');
+    int spanishCol = columnMappings.indexOf('Spanish');
+    int definitionCol = columnMappings.indexOf('Definition');
+    int synonymCol = columnMappings.indexOf('Synonym');
+
+    // Skip header row (index 0)
+    for (int i = 1; i < widget.csvData.length; i++) {
+      List<dynamic> row = widget.csvData[i];
+
+      // Skip empty rows
+      if (row.isEmpty || row.every((cell) => cell.toString().trim().isEmpty)) {
+        continue;
+      }
+
+      // Extract values using safe cell access
+      String english = _safeGetCell(row, englishCol);
+      String spanish = _safeGetCell(row, spanishCol);
+      String definition = _safeGetCell(row, definitionCol);
+      String synonym = _safeGetCell(row, synonymCol);
+
+      // Only add if at least one field has content
+      if (english.isNotEmpty ||
+          spanish.isNotEmpty ||
+          definition.isNotEmpty ||
+          synonym.isNotEmpty) {
+        entries.add(GlossaryEntry(
+          english: english,
+          spanish: spanish,
+          definition: definition,
+          synonym: synonym,
+        ));
+      }
+    }
+
+    return entries;
+  }
+
+  /// Detects duplicate entries in the list.
   List<Map<String, dynamic>> _detectDuplicates(List<GlossaryEntry> entries) {
     List<Map<String, dynamic>> duplicates = [];
     Map<String, int> seen = {};
 
     for (int i = 0; i < entries.length; i++) {
-      String key = '${entries[i].english}|${entries[i].spanish}|${entries[i].definition}|${entries[i].synonym}'.toLowerCase();
+      // Create a unique key from all fields
+      String key = '${entries[i].english}|${entries[i].spanish}|'
+              '${entries[i].definition}|${entries[i].synonym}'
+          .toLowerCase();
+
       if (seen.containsKey(key)) {
         duplicates.add({
           'index': i,
@@ -105,53 +180,96 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
     return duplicates;
   }
 
-  /// Safely get a cell value from a row, handling mismatched column lengths
-  String _safeGetCell(List<dynamic> row, int columnIndex) {
-    if (columnIndex < 0 || columnIndex >= row.length) {
-      return '';
-    }
-    final value = row[columnIndex];
-    if (value == null) {
-      return '';
-    }
-    return value.toString().trim();
-  }
+  /// Removes duplicate entries from the list.
+  List<GlossaryEntry> _removeDuplicates(
+    List<GlossaryEntry> entries,
+    List<Map<String, dynamic>> duplicates,
+  ) {
+    Set<int> indicesToRemove = duplicates.map((d) => d['index'] as int).toSet();
+    List<GlossaryEntry> cleaned = [];
 
-  List<GlossaryEntry> _buildEntriesFromMapping() {
-    List<GlossaryEntry> entries = [];
-    
-    int englishCol = columnMappings.indexOf('English');
-    int spanishCol = columnMappings.indexOf('Spanish');
-    int definitionCol = columnMappings.indexOf('Definition');
-    int synonymCol = columnMappings.indexOf('Synonym');
-
-    for (int i = 1; i < widget.csvData.length; i++) {
-      List<dynamic> row = widget.csvData[i];
-      
-      if (row.isEmpty || row.every((cell) => cell.toString().trim().isEmpty)) {
-        continue;
-      }
-
-      // Use safe cell access to handle mismatched row lengths
-      String english = _safeGetCell(row, englishCol);
-      String spanish = _safeGetCell(row, spanishCol);
-      String definition = _safeGetCell(row, definitionCol);
-      String synonym = _safeGetCell(row, synonymCol);
-
-      if (english.isNotEmpty || spanish.isNotEmpty || definition.isNotEmpty || synonym.isNotEmpty) {
-        entries.add(GlossaryEntry(
-          english: english,
-          spanish: spanish,
-          definition: definition,
-          synonym: synonym,
-        ));
+    for (int i = 0; i < entries.length; i++) {
+      if (!indicesToRemove.contains(i)) {
+        cleaned.add(entries[i]);
       }
     }
 
-    return entries;
+    return cleaned;
   }
 
-  Future<void> _showDuplicateWarning(List<Map<String, dynamic>> duplicates, List<GlossaryEntry> entries) async {
+  /// Builds a display string for an entry (used in duplicate warning).
+  String _buildEntryDisplayString(GlossaryEntry entry) {
+    List<String> parts = [];
+    if (entry.english.isNotEmpty) parts.add(entry.english);
+    if (entry.spanish.isNotEmpty) parts.add(entry.spanish);
+    if (entry.definition.isNotEmpty) parts.add(entry.definition);
+    if (entry.synonym.isNotEmpty) parts.add(entry.synonym);
+    return parts.isEmpty ? '(empty)' : parts.join(' / ');
+  }
+
+  // ===========================================================================
+  // IMPORT ACTIONS
+  // ===========================================================================
+
+  /// Handles the import button tap.
+  void _handleImport() {
+    if (!_isValidMapping) {
+      _showSnackBar('Please map at least one column', isError: true);
+      return;
+    }
+
+    if (_glossaryNameController.text.trim().isEmpty) {
+      _showSnackBar('Please enter a glossary name', isError: true);
+      return;
+    }
+
+    List<GlossaryEntry> entries = _buildEntriesFromMapping();
+
+    if (entries.isEmpty) {
+      _showSnackBar('No valid entries found in CSV', isError: true);
+      return;
+    }
+
+    List<Map<String, dynamic>> duplicates = _detectDuplicates(entries);
+
+    if (duplicates.isNotEmpty) {
+      _showDuplicateWarning(duplicates, entries);
+    } else {
+      _finalizeImport(entries);
+    }
+  }
+
+  /// Completes the import with the given entries.
+  void _finalizeImport(List<GlossaryEntry> entries) {
+    if (_glossaryNameController.text.trim().isEmpty) {
+      _showSnackBar('Please enter a glossary name', isError: true);
+      return;
+    }
+
+    if (entries.isEmpty) {
+      _showSnackBar('No valid entries to import', isError: true);
+      return;
+    }
+
+    final glossary = GlossaryItem(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      name: _glossaryNameController.text.trim(),
+      parentId: widget.parentFolderId,
+      entries: entries,
+    );
+
+    Navigator.pop(context, glossary);
+  }
+
+  // ===========================================================================
+  // DIALOGS
+  // ===========================================================================
+
+  /// Shows a warning dialog for duplicate entries.
+  Future<void> _showDuplicateWarning(
+    List<Map<String, dynamic>> duplicates,
+    List<GlossaryEntry> entries,
+  ) async {
     return showDialog(
       context: context,
       builder: (context) => Dialog(
@@ -166,6 +284,7 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Header
               Row(
                 children: [
                   Container(
@@ -174,7 +293,11 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
                       color: Colors.orange.withOpacity(0.15),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 24),
+                    child: const Icon(
+                      Icons.warning_amber_rounded,
+                      color: Colors.orange,
+                      size: 24,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   const Text(
@@ -188,11 +311,16 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
                 ],
               ),
               const SizedBox(height: 20),
+
+              // Duplicate count
               Text(
-                'Found ${duplicates.length} duplicate ${duplicates.length == 1 ? 'entry' : 'entries'}:',
+                'Found ${duplicates.length} duplicate '
+                '${duplicates.length == 1 ? 'entry' : 'entries'}:',
                 style: const TextStyle(fontWeight: FontWeight.w600, color: darkText),
               ),
               const SizedBox(height: 12),
+
+              // Duplicate list preview
               Container(
                 height: 120,
                 decoration: BoxDecoration(
@@ -232,15 +360,23 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
                   },
                 ),
               ),
+
+              // "And X more" message
               if (duplicates.length > 5)
                 Padding(
                   padding: const EdgeInsets.only(top: 8.0),
                   child: Text(
                     '... and ${duplicates.length - 5} more',
-                    style: const TextStyle(fontSize: 12, color: subtleText, fontStyle: FontStyle.italic),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: subtleText,
+                      fontStyle: FontStyle.italic,
+                    ),
                   ),
                 ),
               const SizedBox(height: 24),
+
+              // Action buttons
               Row(
                 children: [
                   Expanded(
@@ -269,7 +405,9 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
                       style: TextButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         backgroundColor: Colors.orange.withOpacity(0.1),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                       child: const Text(
                         'Skip Dupes',
@@ -289,7 +427,9 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
                         backgroundColor: primaryGreen,
                         foregroundColor: Colors.white,
                         elevation: 0,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                       child: const Text(
                         'Import All',
@@ -306,40 +446,85 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
     );
   }
 
-  List<GlossaryEntry> _removeDuplicates(List<GlossaryEntry> entries, List<Map<String, dynamic>> duplicates) {
-    Set<int> indicesToRemove = duplicates.map((d) => d['index'] as int).toSet();
-    List<GlossaryEntry> cleaned = [];
-    
-    for (int i = 0; i < entries.length; i++) {
-      if (!indicesToRemove.contains(i)) {
-        cleaned.add(entries[i]);
-      }
-    }
-    
-    return cleaned;
-  }
+  /// Shows the help dialog with import instructions.
+  void _showHelpDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: primaryGreen.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.lightbulb_outline,
+                      color: primaryGreen,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Text(
+                    'How to Import',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: darkText,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
 
-  void _finalizeImport(List<GlossaryEntry> entries) {
-    if (_glossaryNameController.text.trim().isEmpty) {
-      _showSnackBar('Please enter a glossary name', isError: true);
-      return;
-    }
+              // Steps
+              _buildHelpItem('1', 'Enter a name for your glossary'),
+              _buildHelpItem('2', 'Map each CSV column to a field type'),
+              _buildHelpItem('3', 'Preview your data in the table below'),
+              _buildHelpItem('4', 'Tap Import when ready'),
+              const SizedBox(height: 20),
 
-    if (entries.isEmpty) {
-      _showSnackBar('No valid entries to import', isError: true);
-      return;
-    }
-
-    final glossary = GlossaryItem(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      name: _glossaryNameController.text.trim(),
-      parentId: widget.parentFolderId,
-      entries: entries,
+              // Close button
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: primaryGreen,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Got it!',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
-
-    Navigator.pop(context, glossary);
   }
 
+  // ===========================================================================
+  // UI HELPERS
+  // ===========================================================================
+
+  /// Shows a styled snackbar.
   void _showSnackBar(String message, {bool isError = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -362,35 +547,31 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
     );
   }
 
-  void _handleImport() {
-    if (!_isValidMapping) {
-      _showSnackBar('Please map at least one column', isError: true);
-      return;
-    }
-
-    if (_glossaryNameController.text.trim().isEmpty) {
-      _showSnackBar('Please enter a glossary name', isError: true);
-      return;
-    }
-
-    List<GlossaryEntry> entries = _buildEntriesFromMapping();
-
-    if (entries.isEmpty) {
-      _showSnackBar('No valid entries found in CSV', isError: true);
-      return;
-    }
-
-    List<Map<String, dynamic>> duplicates = _detectDuplicates(entries);
-
-    if (duplicates.isNotEmpty) {
-      _showDuplicateWarning(duplicates, entries);
-    } else {
-      _finalizeImport(entries);
+  /// Returns the icon for a mapping type.
+  IconData _getMappingIcon(String mapping) {
+    switch (mapping) {
+      case 'Ignore':
+        return Icons.block_outlined;
+      case 'English':
+        return Icons.translate;
+      case 'Spanish':
+        return Icons.language;
+      case 'Definition':
+        return Icons.menu_book_outlined;
+      case 'Synonym':
+        return Icons.swap_horiz;
+      default:
+        return Icons.help_outline;
     }
   }
 
+  // ===========================================================================
+  // BUILD METHODS
+  // ===========================================================================
+
   @override
   Widget build(BuildContext context) {
+    // Handle empty CSV data
     if (widget.csvData.isEmpty) {
       return Scaffold(
         backgroundColor: backgroundColor,
@@ -405,12 +586,20 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
                   color: Colors.grey.shade200,
                   shape: BoxShape.circle,
                 ),
-                child: Icon(Icons.table_chart_outlined, size: 48, color: Colors.grey.shade400),
+                child: Icon(
+                  Icons.table_chart_outlined,
+                  size: 48,
+                  color: Colors.grey.shade400,
+                ),
               ),
               const SizedBox(height: 20),
               const Text(
                 'No data found',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: darkText),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: darkText,
+                ),
               ),
               const SizedBox(height: 8),
               const Text(
@@ -434,28 +623,22 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Glossary Name Card
                   _buildGlossaryNameCard(),
                   const SizedBox(height: 16),
-                  
-                  // Column Mapping Section
                   _buildMappingSection(),
                   const SizedBox(height: 16),
-                  
-                  // Preview Section
                   _buildPreviewSection(),
                 ],
               ),
             ),
           ),
-          
-          // Bottom Action Bar
           _buildBottomBar(),
         ],
       ),
     );
   }
 
+  /// Builds the app bar.
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       backgroundColor: cardColor,
@@ -490,68 +673,14 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
             ),
             child: const Icon(Icons.help_outline, size: 18, color: subtleText),
           ),
-          onPressed: () => _showHelpDialog(),
+          onPressed: _showHelpDialog,
         ),
         const SizedBox(width: 8),
       ],
     );
   }
 
-  void _showHelpDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: primaryGreen.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(Icons.lightbulb_outline, color: primaryGreen, size: 24),
-                  ),
-                  const SizedBox(width: 12),
-                  const Text(
-                    'How to Import',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: darkText),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              _buildHelpItem('1', 'Enter a name for your glossary'),
-              _buildHelpItem('2', 'Map each CSV column to a field type'),
-              _buildHelpItem('3', 'Preview your data in the table below'),
-              _buildHelpItem('4', 'Tap Import when ready'),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.pop(context),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryGreen,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  child: const Text('Got it!', style: TextStyle(fontWeight: FontWeight.w600)),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
+  /// Builds a help item row.
   Widget _buildHelpItem(String number, String text) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -567,7 +696,10 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
             child: Center(
               child: Text(
                 number,
-                style: const TextStyle(color: primaryGreen, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  color: primaryGreen,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ),
@@ -580,6 +712,7 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
     );
   }
 
+  /// Builds the glossary name input card.
   Widget _buildGlossaryNameCard() {
     return Container(
       decoration: BoxDecoration(
@@ -597,6 +730,7 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Header
           Row(
             children: [
               Container(
@@ -619,6 +753,8 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
             ],
           ),
           const SizedBox(height: 16),
+
+          // Name input
           TextField(
             controller: _glossaryNameController,
             style: const TextStyle(fontSize: 16, color: darkText),
@@ -644,6 +780,7 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
     );
   }
 
+  /// Builds the column mapping section.
   Widget _buildMappingSection() {
     return Container(
       decoration: BoxDecoration(
@@ -661,6 +798,7 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Header
           Row(
             children: [
               Container(
@@ -669,7 +807,11 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
                   color: primaryGreen.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.view_column_outlined, color: primaryGreen, size: 20),
+                child: const Icon(
+                  Icons.view_column_outlined,
+                  color: primaryGreen,
+                  size: 20,
+                ),
               ),
               const SizedBox(width: 12),
               const Expanded(
@@ -695,6 +837,8 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
             ],
           ),
           const SizedBox(height: 16),
+
+          // Mapping cards
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
@@ -709,14 +853,17 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
     );
   }
 
+  /// Builds a single column mapping card.
   Widget _buildMappingCard(int index) {
     final currentMapping = columnMappings[index] ?? 'Ignore';
     final isIgnored = currentMapping == 'Ignore';
     final headerValue = widget.csvData[0][index].toString();
-    
+
     return Container(
       width: 140,
-      margin: EdgeInsets.only(right: index < widget.csvData[0].length - 1 ? 12 : 0),
+      margin: EdgeInsets.only(
+        right: index < widget.csvData[0].length - 1 ? 12 : 0,
+      ),
       decoration: BoxDecoration(
         color: isIgnored ? Colors.grey.shade50 : primaryGreen.withOpacity(0.08),
         borderRadius: BorderRadius.circular(14),
@@ -729,13 +876,15 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header label
+          // Column label
           Row(
             children: [
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: isIgnored ? Colors.grey.shade200 : primaryGreen.withOpacity(0.15),
+                  color: isIgnored
+                      ? Colors.grey.shade200
+                      : primaryGreen.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
@@ -760,7 +909,7 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          
+
           // CSV header name
           Text(
             headerValue,
@@ -773,7 +922,7 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
             overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 12),
-          
+
           // Dropdown
           Container(
             decoration: BoxDecoration(
@@ -786,7 +935,11 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
               child: DropdownButton<String>(
                 value: currentMapping,
                 isExpanded: true,
-                icon: Icon(Icons.keyboard_arrow_down, size: 18, color: isIgnored ? subtleText : primaryGreen),
+                icon: Icon(
+                  Icons.keyboard_arrow_down,
+                  size: 18,
+                  color: isIgnored ? subtleText : primaryGreen,
+                ),
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w500,
@@ -802,7 +955,9 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
                         Icon(
                           _getMappingIcon(option),
                           size: 14,
-                          color: isUsed ? Colors.grey.shade300 : (option == 'Ignore' ? subtleText : primaryGreen),
+                          color: isUsed
+                              ? Colors.grey.shade300
+                              : (option == 'Ignore' ? subtleText : primaryGreen),
                         ),
                         const SizedBox(width: 6),
                         Text(
@@ -829,9 +984,10 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
     );
   }
 
+  /// Builds the data preview section.
   Widget _buildPreviewSection() {
     int previewRows = widget.csvData.length > 6 ? 6 : widget.csvData.length;
-    
+
     return Container(
       decoration: BoxDecoration(
         color: cardColor,
@@ -848,6 +1004,7 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Header
           Row(
             children: [
               Container(
@@ -856,7 +1013,11 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
                   color: primaryGreen.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.table_chart_outlined, color: primaryGreen, size: 20),
+                child: const Icon(
+                  Icons.table_chart_outlined,
+                  color: primaryGreen,
+                  size: 20,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -882,6 +1043,8 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
             ],
           ),
           const SizedBox(height: 16),
+
+          // Preview table
           Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
@@ -895,95 +1058,11 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // Header row
-                    Container(
-                      color: primaryGreen.withOpacity(0.1),
-                      child: Row(
-                        children: List.generate(
-                          widget.csvData[0].length,
-                          (colIndex) {
-                            final mapping = columnMappings[colIndex] ?? 'Ignore';
-                            final isIgnored = mapping == 'Ignore';
-                            return Container(
-                              width: 120,
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                              decoration: BoxDecoration(
-                                border: Border(
-                                  right: colIndex < widget.csvData[0].length - 1
-                                      ? BorderSide(color: Colors.grey.shade200)
-                                      : BorderSide.none,
-                                ),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    widget.csvData[0][colIndex].toString(),
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                      color: isIgnored ? subtleText : darkText,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: isIgnored ? Colors.grey.shade200 : primaryGreen,
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                      mapping,
-                                      style: TextStyle(
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w600,
-                                        color: isIgnored ? subtleText : Colors.white,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ),
+                    _buildPreviewHeaderRow(),
                     // Data rows
                     ...List.generate(
                       previewRows - 1,
-                      (rowIndex) => Container(
-                        color: rowIndex.isEven ? Colors.grey.shade50 : cardColor,
-                        child: Row(
-                          children: List.generate(
-                            widget.csvData[0].length,
-                            (colIndex) {
-                              final mapping = columnMappings[colIndex] ?? 'Ignore';
-                              final isIgnored = mapping == 'Ignore';
-                              return Container(
-                                width: 120,
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                                decoration: BoxDecoration(
-                                  border: Border(
-                                    right: colIndex < widget.csvData[0].length - 1
-                                        ? BorderSide(color: Colors.grey.shade200)
-                                        : BorderSide.none,
-                                    bottom: BorderSide(color: Colors.grey.shade100),
-                                  ),
-                                ),
-                                child: Text(
-                                  _safeGetCell(widget.csvData[rowIndex + 1], colIndex),
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: isIgnored ? subtleText : darkText,
-                                  ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ),
+                      (rowIndex) => _buildPreviewDataRow(rowIndex),
                     ),
                   ],
                 ),
@@ -995,6 +1074,101 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
     );
   }
 
+  /// Builds the preview table header row.
+  Widget _buildPreviewHeaderRow() {
+    return Container(
+      color: primaryGreen.withOpacity(0.1),
+      child: Row(
+        children: List.generate(
+          widget.csvData[0].length,
+          (colIndex) {
+            final mapping = columnMappings[colIndex] ?? 'Ignore';
+            final isIgnored = mapping == 'Ignore';
+            return Container(
+              width: 120,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              decoration: BoxDecoration(
+                border: Border(
+                  right: colIndex < widget.csvData[0].length - 1
+                      ? BorderSide(color: Colors.grey.shade200)
+                      : BorderSide.none,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.csvData[0][colIndex].toString(),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      color: isIgnored ? subtleText : darkText,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: isIgnored ? Colors.grey.shade200 : primaryGreen,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      mapping,
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w600,
+                        color: isIgnored ? subtleText : Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  /// Builds a preview table data row.
+  Widget _buildPreviewDataRow(int rowIndex) {
+    return Container(
+      color: rowIndex.isEven ? Colors.grey.shade50 : cardColor,
+      child: Row(
+        children: List.generate(
+          widget.csvData[0].length,
+          (colIndex) {
+            final mapping = columnMappings[colIndex] ?? 'Ignore';
+            final isIgnored = mapping == 'Ignore';
+            return Container(
+              width: 120,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              decoration: BoxDecoration(
+                border: Border(
+                  right: colIndex < widget.csvData[0].length - 1
+                      ? BorderSide(color: Colors.grey.shade200)
+                      : BorderSide.none,
+                  bottom: BorderSide(color: Colors.grey.shade100),
+                ),
+              ),
+              child: Text(
+                _safeGetCell(widget.csvData[rowIndex + 1], colIndex),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isIgnored ? subtleText : darkText,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  /// Builds the bottom action bar.
   Widget _buildBottomBar() {
     return Container(
       decoration: BoxDecoration(
@@ -1016,8 +1190,8 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: _isValidMapping 
-                    ? primaryGreen.withOpacity(0.1) 
+                color: _isValidMapping
+                    ? primaryGreen.withOpacity(0.1)
                     : Colors.orange.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -1052,7 +1226,7 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
               ),
             ),
             const SizedBox(height: 12),
-            
+
             // Import button
             SizedBox(
               width: double.infinity,
@@ -1094,11 +1268,5 @@ class _CsvColumnMappingScreenState extends State<CsvColumnMappingScreen> {
         ),
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _glossaryNameController.dispose();
-    super.dispose();
   }
 }

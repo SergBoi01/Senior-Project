@@ -1,18 +1,45 @@
 import 'package:flutter/material.dart';
 import '../models/library_models.dart';
 
+// =============================================================================
+// LIBRARY ITEM CARD
+// =============================================================================
+
+/// A card widget that displays a folder or glossary item in the library.
+/// 
+/// Features:
+/// - Displays icon based on item type (folder, subfolder, glossary)
+/// - Shows checkbox for selection
+/// - Supports tap to open, long-press for actions menu
+/// - Visual feedback when checked
 class LibraryItemCard extends StatelessWidget {
-  // Design colors matching the app theme
+  // ===========================================================================
+  // CONSTANTS
+  // ===========================================================================
+
   static const Color primaryGreen = Color(0xFF5B8A51);
   static const Color backgroundColor = Color(0xFFE8E8E8);
   static const Color cardColor = Colors.white;
   static const Color darkText = Color(0xFF2D2D2D);
   static const Color subtleText = Color(0xFF6B6B6B);
 
-  final dynamic item; // Can be FolderItem or GlossaryItem
+  // ===========================================================================
+  // PROPERTIES
+  // ===========================================================================
+
+  /// The item to display (FolderItem or GlossaryItem).
+  final dynamic item;
+
+  /// Callback when the card is tapped.
   final VoidCallback onTap;
+
+  /// Callback when rename is selected from the action menu.
   final VoidCallback? onRename;
+
+  /// Callback when delete is selected from the action menu.
   final VoidCallback? onDelete;
+
+  /// Callback when the checkbox is toggled.
   final Function(bool)? onCheckboxChanged;
 
   const LibraryItemCard({
@@ -24,18 +51,34 @@ class LibraryItemCard extends StatelessWidget {
     this.onCheckboxChanged,
   }) : super(key: key);
 
+  // ===========================================================================
+  // COMPUTED PROPERTIES
+  // ===========================================================================
+
+  /// Returns true if the item is a folder.
   bool get isFolder => item is FolderItem;
-  bool get isSubfolder => item is FolderItem && (item as FolderItem).parentId != null;
+
+  /// Returns true if the item is a subfolder (folder with a parent).
+  bool get isSubfolder =>
+      item is FolderItem && (item as FolderItem).parentId != null;
+
+  /// Returns the item's checked state.
   bool get isChecked => item.isChecked;
+
+  /// Returns the item's name.
   String get name => item.name;
-  
-  // Get the appropriate icon for the item type
+
+  /// Returns the appropriate icon for the item type.
   IconData get itemIcon {
     if (!isFolder) return Icons.book;
     return isSubfolder ? Icons.folder_copy : Icons.folder;
   }
 
-  // Show action popup on long press
+  // ===========================================================================
+  // ACTION MENU
+  // ===========================================================================
+
+  /// Shows the action popup menu on long press.
   void _showActionPopup(BuildContext context) {
     // Determine item type text
     String itemTypeText;
@@ -44,7 +87,7 @@ class LibraryItemCard extends StatelessWidget {
     } else {
       itemTypeText = 'Glossary';
     }
-    
+
     showDialog(
       context: context,
       builder: (context) => Dialog(
@@ -58,7 +101,7 @@ class LibraryItemCard extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Header with item info
+              // Item info header
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -70,8 +113,8 @@ class LibraryItemCard extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: isFolder 
-                            ? Colors.amber.withOpacity(0.15) 
+                        color: isFolder
+                            ? Colors.amber.withOpacity(0.15)
                             : Colors.blue.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(10),
                       ),
@@ -99,10 +142,7 @@ class LibraryItemCard extends StatelessWidget {
                           const SizedBox(height: 2),
                           Text(
                             itemTypeText,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: subtleText,
-                            ),
+                            style: const TextStyle(fontSize: 12, color: subtleText),
                           ),
                         ],
                       ),
@@ -111,8 +151,8 @@ class LibraryItemCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 20),
-              
-              // Action buttons
+
+              // Rename action
               _buildActionButton(
                 context,
                 icon: Icons.edit_outlined,
@@ -124,6 +164,8 @@ class LibraryItemCard extends StatelessWidget {
                 },
               ),
               const SizedBox(height: 10),
+
+              // Delete action
               _buildActionButton(
                 context,
                 icon: Icons.delete_outline,
@@ -135,14 +177,12 @@ class LibraryItemCard extends StatelessWidget {
                 },
               ),
               const SizedBox(height: 16),
-              
+
               // Cancel button
               SizedBox(
                 width: double.infinity,
                 child: TextButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                  },
+                  onPressed: () => Navigator.pop(context),
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
@@ -152,10 +192,7 @@ class LibraryItemCard extends StatelessWidget {
                   ),
                   child: const Text(
                     'Cancel',
-                    style: TextStyle(
-                      color: subtleText,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: TextStyle(color: subtleText, fontWeight: FontWeight.w600),
                   ),
                 ),
               ),
@@ -166,6 +203,7 @@ class LibraryItemCard extends StatelessWidget {
     );
   }
 
+  /// Builds an action button for the popup menu.
   Widget _buildActionButton(
     BuildContext context, {
     required IconData icon,
@@ -205,11 +243,14 @@ class LibraryItemCard extends StatelessWidget {
     );
   }
 
+  // ===========================================================================
+  // BUILD
+  // ===========================================================================
+
   @override
   Widget build(BuildContext context) {
-    // Card color changes based on checkbox state
+    // Highlight card when checked
     Color bgColor = isChecked ? primaryGreen.withOpacity(0.15) : cardColor;
-    Color textColor = darkText;
 
     return GestureDetector(
       onTap: onTap,
@@ -219,9 +260,7 @@ class LibraryItemCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: bgColor,
           borderRadius: BorderRadius.circular(16),
-          border: isChecked 
-              ? Border.all(color: primaryGreen, width: 2)
-              : null,
+          border: isChecked ? Border.all(color: primaryGreen, width: 2) : null,
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.05),
@@ -236,15 +275,15 @@ class LibraryItemCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // Icon and item name
+              // Icon and name
               Expanded(
                 child: Row(
                   children: [
-                    // Folder or Glossary icon with background
+                    // Item icon with background
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: isFolder 
+                        color: isFolder
                             ? Colors.amber.withOpacity(0.15)
                             : Colors.blue.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(10),
@@ -256,12 +295,13 @@ class LibraryItemCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 12),
+
                     // Item name
                     Flexible(
                       child: Text(
                         name,
-                        style: TextStyle(
-                          color: textColor,
+                        style: const TextStyle(
+                          color: darkText,
                           fontSize: 15,
                           fontWeight: FontWeight.w600,
                         ),
@@ -273,10 +313,10 @@ class LibraryItemCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              // Checkbox - just toggles check state
+
+              // Checkbox
               GestureDetector(
                 onTap: () {
-                  // Simply toggle the checkbox state
                   if (onCheckboxChanged != null) {
                     onCheckboxChanged!(!isChecked);
                   }
@@ -293,11 +333,7 @@ class LibraryItemCard extends StatelessWidget {
                     ),
                   ),
                   child: isChecked
-                      ? const Icon(
-                          Icons.check,
-                          size: 16,
-                          color: Colors.white,
-                        )
+                      ? const Icon(Icons.check, size: 16, color: Colors.white)
                       : null,
                 ),
               ),

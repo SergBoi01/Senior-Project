@@ -1,44 +1,51 @@
-import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../models/library_models.dart';
 
-/// Service class to handle library data persistence using SharedPreferences
+// =============================================================================
+// LIBRARY STORAGE SERVICE
+// =============================================================================
+
+/// Service class for persisting library data.
+/// 
+/// TODO: Teammate will implement actual persistence (e.g., SharedPreferences,
+/// SQLite, Firebase, etc.)
+/// 
+/// This service handles:
+/// - Saving folder hierarchy to storage
+/// - Loading folder hierarchy from storage
+/// - Clearing all library data
 class LibraryStorage {
-  static const String _storageKey = 'library_folders';
+  // ---------------------------------------------------------------------------
+  // Save Operations
+  // ---------------------------------------------------------------------------
 
-  /// Save the list of root folders to SharedPreferences
+  /// Saves the list of root folders to storage.
+  /// 
+  /// TODO: Implement actual persistence.
   static Future<void> saveFolders(List<FolderItem> folders) async {
-    final prefs = await SharedPreferences.getInstance();
-    final jsonList = folders.map((folder) => folder.toJson()).toList();
-    final jsonString = jsonEncode(jsonList);
-    await prefs.setString(_storageKey, jsonString);
+    // Placeholder - teammate will implement persistence
   }
 
-  /// Load the list of root folders from SharedPreferences
+  // ---------------------------------------------------------------------------
+  // Load Operations
+  // ---------------------------------------------------------------------------
+
+  /// Loads the list of root folders from storage.
+  /// 
+  /// TODO: Implement actual persistence.
+  /// Returns an empty list until persistence is implemented.
   static Future<List<FolderItem>> loadFolders() async {
-    final prefs = await SharedPreferences.getInstance();
-    final jsonString = prefs.getString(_storageKey);
-    
-    if (jsonString == null || jsonString.isEmpty) {
-      return [];
-    }
-
-    try {
-      final jsonList = jsonDecode(jsonString) as List<dynamic>;
-      return jsonList
-          .map((json) => FolderItem.fromJson(json as Map<String, dynamic>))
-          .toList();
-    } catch (e) {
-      // If there's an error parsing, return empty list
-      print('Error loading library data: $e');
-      return [];
-    }
+    // Placeholder - teammate will implement persistence
+    return [];
   }
 
-  /// Clear all library data
+  // ---------------------------------------------------------------------------
+  // Delete Operations
+  // ---------------------------------------------------------------------------
+
+  /// Clears all library data from storage.
+  /// 
+  /// TODO: Implement actual persistence.
   static Future<void> clearAll() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_storageKey);
+    // Placeholder - teammate will implement persistence
   }
 }
-

@@ -1,15 +1,26 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-/// Represents a glossary entry with text fields and optional symbol image
+// =============================================================================
+// GLOSSARY ENTRY MODEL
+// =============================================================================
+
+/// Represents a single glossary entry with text fields and optional symbol image.
+/// 
+/// Each entry contains:
+/// - [english]: The English term
+/// - [spanish]: The Spanish translation
+/// - [definition]: A text definition of the term
+/// - [synonym]: Related synonyms
+/// - [symbolImage]: Optional drawn symbol stored as PNG bytes
 class GlossaryEntry {
   String english;
   String spanish;
   String definition;
-  String synonym;  
-  Uint8List? symbolImage; // for drawn symbols
+  String synonym;
+  Uint8List? symbolImage;
 
-  // Main constructor
+  /// Creates a new glossary entry with all fields.
   GlossaryEntry({
     required this.english,
     required this.spanish,
@@ -18,15 +29,20 @@ class GlossaryEntry {
     this.symbolImage,
   });
 
-  // Short constructor for word initialization
+  /// Creates a minimal entry with just an English word.
+  /// Useful for quick word initialization.
   GlossaryEntry.short({required String word})
       : english = word,
-        spanish = "",
-        definition = "",
-        synonym = "",
+        spanish = '',
+        definition = '',
+        synonym = '',
         symbolImage = null;
 
-  // JSON serialization
+  // ---------------------------------------------------------------------------
+  // JSON Serialization
+  // ---------------------------------------------------------------------------
+
+  /// Converts the entry to a JSON map for storage.
   Map<String, dynamic> toJson() {
     return {
       'english': english,
@@ -37,26 +53,36 @@ class GlossaryEntry {
     };
   }
 
+  /// Creates an entry from a JSON map.
   factory GlossaryEntry.fromJson(Map<String, dynamic> json) {
     return GlossaryEntry(
       english: json['english'] ?? '',
       spanish: json['spanish'] ?? '',
       definition: json['definition'] ?? '',
       synonym: json['synonym'] ?? '',
-      symbolImage: json['symbolImage'] != null 
-          ? base64Decode(json['symbolImage']) 
-          : null,
+      symbolImage:
+          json['symbolImage'] != null ? base64Decode(json['symbolImage']) : null,
     );
   }
 }
 
-/// Represents a folder in the library system
+// =============================================================================
+// FOLDER ITEM MODEL
+// =============================================================================
+
+/// Represents a folder in the library hierarchy.
+/// 
+/// Folders can contain:
+/// - Other [FolderItem]s (subfolders)
+/// - [GlossaryItem]s (glossaries)
+/// 
+/// Root-level folders have [parentId] set to null.
 class FolderItem {
   final String id;
   String name;
   bool isChecked;
-  String? parentId; // null for root level
-  List<dynamic> children; // Can contain FolderItem or GlossaryItem
+  String? parentId;
+  List<dynamic> children;
 
   FolderItem({
     required this.id,
@@ -66,12 +92,16 @@ class FolderItem {
     List<dynamic>? children,
   }) : children = children ?? [];
 
-  /// Add a child folder or glossary
+  // ---------------------------------------------------------------------------
+  // Child Management
+  // ---------------------------------------------------------------------------
+
+  /// Adds a child (folder or glossary) to this folder.
   void addChild(dynamic item) {
     children.add(item);
   }
 
-  /// Remove a child by id
+  /// Removes a child by its ID.
   void removeChild(String id) {
     children.removeWhere((item) {
       if (item is FolderItem) return item.id == id;
@@ -80,17 +110,21 @@ class FolderItem {
     });
   }
 
-  /// Get all folders in children
-  List<FolderItem> get folders {
-    return children.whereType<FolderItem>().toList();
-  }
+  // ---------------------------------------------------------------------------
+  // Child Accessors
+  // ---------------------------------------------------------------------------
 
-  /// Get all glossaries in children
-  List<GlossaryItem> get glossaries {
-    return children.whereType<GlossaryItem>().toList();
-  }
+  /// Returns only folder children.
+  List<FolderItem> get folders => children.whereType<FolderItem>().toList();
 
-  // JSON serialization
+  /// Returns only glossary children.
+  List<GlossaryItem> get glossaries => children.whereType<GlossaryItem>().toList();
+
+  // ---------------------------------------------------------------------------
+  // JSON Serialization
+  // ---------------------------------------------------------------------------
+
+  /// Converts the folder (including children) to a JSON map.
   Map<String, dynamic> toJson() {
     return {
       'type': 'folder',
@@ -106,6 +140,7 @@ class FolderItem {
     };
   }
 
+  /// Creates a folder from a JSON map, recursively parsing children.
   factory FolderItem.fromJson(Map<String, dynamic> json) {
     final folder = FolderItem(
       id: json['id'],
@@ -113,8 +148,8 @@ class FolderItem {
       isChecked: json['isChecked'] ?? false,
       parentId: json['parentId'],
     );
-    
-    // Parse children recursively
+
+    // Recursively parse children
     if (json['children'] != null) {
       for (var childJson in json['children']) {
         if (childJson['type'] == 'folder') {
@@ -124,17 +159,23 @@ class FolderItem {
         }
       }
     }
-    
+
     return folder;
   }
 }
 
-/// Represents a glossary in the library system
+// =============================================================================
+// GLOSSARY ITEM MODEL
+// =============================================================================
+
+/// Represents a glossary containing multiple [GlossaryEntry] items.
+/// 
+/// Glossaries must be placed inside a folder (referenced by [parentId]).
 class GlossaryItem {
   final String id;
   String name;
   bool isChecked;
-  String? parentId; // Reference to parent folder
+  String? parentId;
   List<GlossaryEntry> entries;
 
   GlossaryItem({
@@ -145,19 +186,28 @@ class GlossaryItem {
     List<GlossaryEntry>? entries,
   }) : entries = entries ?? [];
 
-  /// Add an entry to the glossary
+  // ---------------------------------------------------------------------------
+  // Entry Management
+  // ---------------------------------------------------------------------------
+
+  /// Adds an entry to the glossary.
   void addEntry(GlossaryEntry entry) {
     entries.add(entry);
   }
 
-  /// Delete entry by index
+  /// Deletes an entry at the specified index.
+  /// Does nothing if the index is out of bounds.
   void deleteEntry(int index) {
     if (index >= 0 && index < entries.length) {
       entries.removeAt(index);
     }
   }
 
-  // JSON serialization
+  // ---------------------------------------------------------------------------
+  // JSON Serialization
+  // ---------------------------------------------------------------------------
+
+  /// Converts the glossary to a JSON map.
   Map<String, dynamic> toJson() {
     return {
       'type': 'glossary',
@@ -169,6 +219,7 @@ class GlossaryItem {
     };
   }
 
+  /// Creates a glossary from a JSON map.
   factory GlossaryItem.fromJson(Map<String, dynamic> json) {
     return GlossaryItem(
       id: json['id'],
@@ -176,9 +227,9 @@ class GlossaryItem {
       isChecked: json['isChecked'] ?? false,
       parentId: json['parentId'],
       entries: (json['entries'] as List<dynamic>?)
-          ?.map((e) => GlossaryEntry.fromJson(e))
-          .toList() ?? [],
+              ?.map((e) => GlossaryEntry.fromJson(e))
+              .toList() ??
+          [],
     );
   }
 }
-
