@@ -961,7 +961,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     await _libraryService.saveLibrary();
   }
 
-
   // Handle item tap
   void _handleItemTap(dynamic item) async {
     if (item is FolderItem) {
