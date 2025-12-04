@@ -130,31 +130,32 @@ class _LibraryScreenState extends State<LibraryScreen> {
       context: context,
       builder: (context) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: cardColor,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header with icon
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: primaryGreen.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(12),
+        child: SingleChildScrollView(
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: cardColor,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header with icon
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: primaryGreen.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        Icons.create_new_folder_outlined,
+                        color: primaryGreen,
+                        size: 24,
+                      ),
                     ),
-                    child: Icon(
-                      Icons.create_new_folder_outlined,
-                      color: primaryGreen,
-                      size: 24,
-                    ),
-                  ),
                   const SizedBox(width: 12),
                   Text(
                     isSubfolder ? 'Create Subfolder' : 'Create Folder',
@@ -261,6 +262,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ],
           ),
         ),
+        ),
       ),
     );
   }
@@ -292,31 +294,32 @@ class _LibraryScreenState extends State<LibraryScreen> {
       context: context,
       builder: (context) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: cardColor,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header with icon
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: primaryGreen.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(12),
+        child: SingleChildScrollView(
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: cardColor,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header with icon
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: primaryGreen.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        Icons.book_outlined,
+                        color: primaryGreen,
+                        size: 24,
+                      ),
                     ),
-                    child: Icon(
-                      Icons.book_outlined,
-                      color: primaryGreen,
-                      size: 24,
-                    ),
-                  ),
                   const SizedBox(width: 12),
                   const Text(
                     'Create Glossary',
@@ -436,6 +439,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ],
           ),
         ),
+        ),
       ),
     );  
   }
@@ -506,7 +510,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
           _currentFolder!.addChild(glossary);
         });
         
-        _saveLibrary(); // Persist changes
+        // Save the glossary entries to SharedPreferences
+        await _libraryService.saveEntries(glossary.id, glossary.entries);
+        
+        _saveLibrary(); // Persist folder structure
         _showStyledSnackBar('Successfully imported ${glossary.entries.length} entries', isError: false);
       }
     } catch (e) {
@@ -681,34 +688,35 @@ class _LibraryScreenState extends State<LibraryScreen> {
       context: context,
       builder: (context) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: cardColor,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header with icon
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: itemColor.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(12),
+        child: SingleChildScrollView(
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: cardColor,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header with icon
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: itemColor.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        itemIcon,
+                        color: itemColor,
+                        size: 24,
+                      ),
                     ),
-                    child: Icon(
-                      itemIcon,
-                      color: itemColor,
-                      size: 24,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    'Rename $itemType',
+                    const SizedBox(width: 12),
+                    Text(
+                      'Rename $itemType',
                     style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
@@ -800,6 +808,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ),
             ],
           ),
+        ),
         ),
       ),
     );
