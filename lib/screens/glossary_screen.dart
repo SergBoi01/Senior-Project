@@ -18,6 +18,13 @@ class GlossaryScreen extends StatefulWidget {
 }
 
 class _GlossaryScreenState extends State<GlossaryScreen> {
+  // Design colors matching the library and CSV import screens
+  static const Color primaryGreen = Color(0xFF5B8A51);
+  static const Color backgroundColor = Color(0xFFE8E8E8);
+  static const Color cardColor = Colors.white;
+  static const Color darkText = Color(0xFF2D2D2D);
+  static const Color subtleText = Color(0xFF6B6B6B);
+
   late GlossaryItem glossaryItem;
   bool showCanvas = false;
   int? editingIndex;
@@ -153,70 +160,167 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   void _onCellTap(int rowIndex, int columnIndex) {
     final entry = glossaryItem.entries[rowIndex];
     if (columnIndex == 4) {
-    if (entry.symbolImage != null && entry.symbolImage!.isNotEmpty) {
-      // Show dialog with current symbol
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Current Symbol'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Image.memory(
-                entry.symbolImage!,
-                width: 600,
-                height: 400,
-                fit: BoxFit.contain,
+      if (entry.symbolImage != null && entry.symbolImage!.isNotEmpty) {
+        // Show dialog with current symbol
+        showDialog(
+          context: context,
+          builder: (context) => Dialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            child: Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: cardColor,
+                borderRadius: BorderRadius.circular(20),
               ),
-              if (entry.strokes != null)
-                Text(
-                  '${entry.strokes?.length} stroke(s)',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-              const SizedBox(height: 8),
-              const Text('What would you like to do?', style: TextStyle(fontSize: 18)),
-            ],
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Header
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: primaryGreen.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.draw_outlined, color: primaryGreen, size: 24),
+                      ),
+                      const SizedBox(width: 12),
+                      const Text(
+                        'Current Symbol',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: darkText,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  // Symbol image
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade200),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.memory(
+                        entry.symbolImage!,
+                        width: 400,
+                        height: 250,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                  ),
+                  if (entry.strokes != null) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: primaryGreen.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '${entry.strokes?.length} stroke(s)',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: primaryGreen,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  const Text(
+                    'What would you like to do?',
+                    style: TextStyle(fontSize: 14, color: subtleText),
+                  ),
+                  const SizedBox(height: 20),
+                  // Action buttons
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              side: BorderSide(color: Colors.grey.shade300),
+                            ),
+                          ),
+                          child: const Text(
+                            'Cancel',
+                            style: TextStyle(color: subtleText, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextButton(
+                          onPressed: () {
+                            setState(() {
+                              entry.symbolImage = null;
+                              entry.strokes = [];
+                              _hasUnsavedChanges = true;
+                            });
+                            Navigator.pop(context);
+                          },
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            backgroundColor: Colors.red.withOpacity(0.1),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: Text(
+                            'Delete',
+                            style: TextStyle(color: Colors.red.shade400, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () {
+                            setState(() {
+                              editingIndex = rowIndex;
+                              showCanvas = true;
+                            });
+                            Navigator.pop(context);
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: primaryGreen,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text(
+                            'Replace',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           ),
-          actionsAlignment: MainAxisAlignment.spaceEvenly,
-          actionsPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-            TextButton(
-              onPressed: () {
-                setState(() {
-                  entry.symbolImage = null; // <-- now properly null
-                  entry.strokes = [];
-                  _hasUnsavedChanges = true;
-                });
-                Navigator.pop(context);
-              },
-              child: const Text('Delete Symbol', style: TextStyle(color: Colors.red)),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                setState(() {
-                  editingIndex = rowIndex;
-                  showCanvas = true;
-                });
-                Navigator.pop(context);
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: Colors.black,
-              ),
-              child: const Text('Replace Drawing'),
-            ),
-          ],
-        ),
-      );
+        );
+      } else {
+        // No current symbol, just open canvas
+        setState(() {
+          editingIndex = rowIndex;
+          showCanvas = true;
+        });
+      }
     } else {
-      // No current symbol, just open canvas
-      setState(() {
-        editingIndex = rowIndex;
-        showCanvas = true;
-      });
-    }
-  } else {
       _editController.text = [
         entry.english,
         entry.spanish,
@@ -224,29 +328,125 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
         entry.synonym
       ][columnIndex];
 
+      final fieldNames = ['English', 'Spanish', 'Definition', 'Synonym'];
+      final fieldIcons = [Icons.translate, Icons.language, Icons.menu_book_outlined, Icons.swap_horiz];
+
       showDialog(
         context: context,
-        builder: (context) => AlertDialog(
-          title: Text(['English', 'Spanish', 'Definition', 'Synonym'][columnIndex]),
-          content: TextField(controller: _editController, autofocus: true, decoration: const InputDecoration(border: OutlineInputBorder())),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-            ElevatedButton(
-              onPressed: () {
-                setState(() {
-                  switch (columnIndex) {
-                    case 0: entry.english = _editController.text; break;
-                    case 1: entry.spanish = _editController.text; break;
-                    case 2: entry.definition = _editController.text; break;
-                    case 3: entry.synonym = _editController.text; break;
-                  }
-                  _hasUnsavedChanges = true;
-                });
-                Navigator.pop(context);
-              },
-              child: const Text('Save'),
+        builder: (context) => Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: SingleChildScrollView(
+            child: Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: cardColor,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: primaryGreen.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(fieldIcons[columnIndex], color: primaryGreen, size: 24),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Edit ${fieldNames[columnIndex]}',
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: darkText,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  // Text field
+                  TextField(
+                    controller: _editController,
+                    autofocus: true,
+                    style: const TextStyle(fontSize: 16, color: darkText),
+                    maxLines: columnIndex == 2 ? 3 : 1, // Definition gets more lines
+                    decoration: InputDecoration(
+                      hintText: 'Enter ${fieldNames[columnIndex].toLowerCase()}...',
+                      hintStyle: TextStyle(color: Colors.grey.shade400),
+                      filled: true,
+                      fillColor: backgroundColor,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: primaryGreen, width: 2),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  // Action buttons
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              side: BorderSide(color: Colors.grey.shade300),
+                            ),
+                          ),
+                          child: const Text(
+                            'Cancel',
+                            style: TextStyle(color: subtleText, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () {
+                            setState(() {
+                              switch (columnIndex) {
+                                case 0: entry.english = _editController.text; break;
+                                case 1: entry.spanish = _editController.text; break;
+                                case 2: entry.definition = _editController.text; break;
+                                case 3: entry.synonym = _editController.text; break;
+                              }
+                              _hasUnsavedChanges = true;
+                            });
+                            Navigator.pop(context);
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: primaryGreen,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text(
+                            'Save',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ],
+          ),
         ),
       );
     }
@@ -261,21 +461,112 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
         if (_hasUnsavedChanges) {
           final discard = await showDialog<bool>(
             context: context,
-            builder: (context) => AlertDialog(
-              title: const Text('Unsaved Changes'),
-              content: const Text('You have unsaved changes. Save before leaving?'),
-              actions: [
-                TextButton(child: const Text('Discard'), onPressed: () => Navigator.of(context).pop(true)),
-                TextButton(child: const Text('Cancel'), onPressed: () => Navigator.of(context).pop(false)),
-                ElevatedButton(
-                  child: const Text('Save'),
-                  onPressed: () async {
-                    await _saveAllGlossaryEntries();
-                    Navigator.of(context).pop(true);
-                  },
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+            builder: (context) => Dialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              child: Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: cardColor,
+                  borderRadius: BorderRadius.circular(20),
                 ),
-              ],
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Warning icon
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withOpacity(0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.warning_amber_rounded,
+                        color: Colors.orange,
+                        size: 40,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    const Text(
+                      'Unsaved Changes',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: darkText,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'You have unsaved changes. Would you like to save before leaving?',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: subtleText,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextButton(
+                            onPressed: () => Navigator.of(context).pop(true),
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                side: BorderSide(color: Colors.grey.shade300),
+                              ),
+                            ),
+                            child: const Text(
+                              'Discard',
+                              style: TextStyle(color: subtleText, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextButton(
+                            onPressed: () => Navigator.of(context).pop(false),
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              backgroundColor: Colors.orange.withOpacity(0.1),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: const Text(
+                              'Cancel',
+                              style: TextStyle(color: Colors.orange, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () async {
+                              await _saveAllGlossaryEntries();
+                              Navigator.of(context).pop(true);
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: primaryGreen,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: const Text(
+                              'Save',
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
             ),
           );
           return discard ?? false;
@@ -283,37 +574,77 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
         return true;
       },
       child: Scaffold(
+        backgroundColor: backgroundColor,
         appBar: AppBar(
-          title: Text(glossaryItem.name),
-          backgroundColor: Colors.grey[800],
+          title: Text(
+            glossaryItem.name,
+            style: const TextStyle(
+              color: darkText,
+              fontWeight: FontWeight.bold,
+              fontSize: 20,
+            ),
+          ),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          iconTheme: const IconThemeData(color: darkText),
           actions: [
             if (_hasUnsavedChanges)
               Padding(
                 padding: const EdgeInsets.only(right: 8.0),
                 child: Center(
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(color: Colors.orange, borderRadius: BorderRadius.circular(4)),
-                    child: const Text('Unsaved', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.orange,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text(
+                      'Unsaved',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ),
               ),
             IconButton(
-              icon: const Icon(Icons.save),
+              icon: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: primaryGreen.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.save, color: primaryGreen, size: 20),
+              ),
               onPressed: _isLoading ? null : _saveAllGlossaryEntries,
               tooltip: 'Save All Entries',
             ),
+            const SizedBox(width: 8),
           ],
         ),
         body: _isLoading
-            ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: const [CircularProgressIndicator(), SizedBox(height: 16), Text('Loading entries...', style: TextStyle(fontSize: 16))]))
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: const [
+                    CircularProgressIndicator(color: primaryGreen),
+                    SizedBox(height: 16),
+                    Text(
+                      'Loading entries...',
+                      style: TextStyle(fontSize: 16, color: subtleText),
+                    ),
+                  ],
+                ),
+              )
             : showCanvas
                 ? _buildCanvasView()
                 : _buildTableView(),
         floatingActionButton: !_isLoading && !showCanvas
             ? FloatingActionButton(
                 onPressed: _addNewEntry,
-                backgroundColor: Colors.black,
+                backgroundColor: primaryGreen,
                 foregroundColor: Colors.white,
                 child: const Icon(Icons.add),
               )
@@ -323,84 +654,114 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   }
 
   Widget _buildTableView() {
-    return Column(
-      children: [
-        // Header row
-        Container(
-          color: Colors.black,
-          child: Row(
-            children: [
-              _buildHeaderCell('English', flex: 2),
-              _buildHeaderCell('Spanish', flex: 2),
-              _buildHeaderCell('Definition', flex: 3),
-              _buildHeaderCell('Synonym', flex: 2),
-              _buildHeaderCell('Symbol', flex: 1),
-              _buildHeaderCell('Delete', flex: 1),
-            ],
+    return Container(
+      margin: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
-        ),
-        
-        // Data rows
-        Expanded(
-          child: glossaryItem.entries.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.book_outlined, size: 64, color: Colors.grey[400]),
-                      const SizedBox(height: 16),
-                      Text(
-                        'No entries yet',
-                        style: TextStyle(
-                          fontSize: 18,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Tap the + button to add an entry',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[500],
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              : ListView.builder(
-                  controller: _scrollController,
-                  itemCount: glossaryItem.entries.length,
-                  itemBuilder: (context, index) {
-                    final entry = glossaryItem.entries[index];
-                    return Container(
-                      decoration: BoxDecoration(
-                        border: Border(
-                          bottom: BorderSide(color: Colors.grey[400]!),
-                        ),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Column(
+          children: [
+            // Header row
+            Container(
+              color: primaryGreen,
+              child: Row(
+                children: [
+                  _buildHeaderCell('English', flex: 2),
+                  _buildHeaderCell('Spanish', flex: 2),
+                  _buildHeaderCell('Definition', flex: 3),
+                  _buildHeaderCell('Synonym', flex: 2),
+                  _buildHeaderCell('Symbol', flex: 1),
+                  _buildHeaderCell('Delete', flex: 1),
+                ],
+              ),
+            ),
+            
+            // Data rows
+            Expanded(
+              child: glossaryItem.entries.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          _buildDataCell(entry.english, index, 0, flex: 2),
-                          _buildDataCell(entry.spanish, index, 1, flex: 2),
-                          _buildDataCell(entry.definition, index, 2, flex: 3),
-                          _buildDataCell(entry.synonym, index, 3, flex: 2),
-                          _buildSymbolCell(entry, index, flex: 1),
-                          Expanded(
-                            flex: 1,
-                            child: IconButton(
-                              icon: const Icon(Icons.delete, color: Colors.red),
-                              onPressed: () => _deleteEntry(index),
-                              tooltip: 'Delete Entry',
+                          Container(
+                            padding: const EdgeInsets.all(24),
+                            decoration: BoxDecoration(
+                              color: primaryGreen.withOpacity(0.1),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.book_outlined,
+                              size: 48,
+                              color: primaryGreen.withOpacity(0.6),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          const Text(
+                            'No entries yet',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                              color: darkText,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Tap the + button to add an entry',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: subtleText,
                             ),
                           ),
                         ],
                       ),
-                    );
-                  },
-                ),
+                    )
+                  : ListView.builder(
+                      controller: _scrollController,
+                      itemCount: glossaryItem.entries.length,
+                      itemBuilder: (context, index) {
+                        final entry = glossaryItem.entries[index];
+                        return Container(
+                          decoration: BoxDecoration(
+                            color: index.isEven ? Colors.grey.shade50 : cardColor,
+                            border: Border(
+                              bottom: BorderSide(color: Colors.grey.shade200),
+                            ),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              _buildDataCell(entry.english, index, 0, flex: 2),
+                              _buildDataCell(entry.spanish, index, 1, flex: 2),
+                              _buildDataCell(entry.definition, index, 2, flex: 3),
+                              _buildDataCell(entry.synonym, index, 3, flex: 2),
+                              _buildSymbolCell(entry, index, flex: 1),
+                              Expanded(
+                                flex: 1,
+                                child: IconButton(
+                                  icon: Icon(Icons.delete_outline, color: Colors.red.shade400),
+                                  onPressed: () => _deleteEntry(index),
+                                  tooltip: 'Delete Entry',
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 
@@ -431,15 +792,24 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
           padding: const EdgeInsets.all(12),
           height: 56,
           alignment: Alignment.center,
-          child: Text(
-            text.isEmpty ? '➕' : text,
-            style: TextStyle(
-              color: text.isEmpty ? Colors.grey : Colors.black,
-              fontSize: 13,
-            ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
+          child: text.isEmpty
+              ? Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: primaryGreen.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Icon(Icons.add, color: primaryGreen, size: 16),
+                )
+              : Text(
+                  text,
+                  style: const TextStyle(
+                    color: darkText,
+                    fontSize: 13,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
         ),
       ),
     );
@@ -473,118 +843,221 @@ class _GlossaryScreenState extends State<GlossaryScreen> {
   }
 
   Widget _buildCanvasView() {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: Row(
-            children: [
-              const Text(
-                'Draw Symbol:',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const Spacer(),
-              Text(
-                '${_currentStrokes.length} stroke(s)',
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
-              ),
-              const SizedBox(width: 16),
-              IconButton(
-                icon: const Icon(Icons.undo),
-                onPressed: () {
-                  if (_currentStrokes.isNotEmpty) {
-                    setState(() => _currentStrokes.removeLast());
-                  }
-                },
-                tooltip: 'Undo Last Stroke',
-              ),
-              IconButton(
-                icon: const Icon(Icons.clear),
-                onPressed: () {
-                  setState(() {
-                    _currentStrokes.clear();
-                    _currentStrokePoints.clear();
-                  });
-                },
-                tooltip: 'Clear Canvas',
-              ),
-            ],
+    return Container(
+      margin: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
-        ),
-        Expanded(
-          child: Container(
-            margin: const EdgeInsets.all(16),
+        ],
+      ),
+      child: Column(
+        children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey),
-              color: Colors.white,
+              color: primaryGreen.withOpacity(0.1),
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(16),
+                topRight: Radius.circular(16),
+              ),
             ),
-            child: GestureDetector(
-              onPanStart: (details) {
-                setState(() {
-                  _currentStrokePoints = [details.localPosition];
-                  _currentStrokeStartTime = DateTime.now();
-                });
-              },
-              onPanUpdate: (details) {
-                setState(() => _currentStrokePoints.add(details.localPosition));
-              },
-              onPanEnd: (details) {
-                if (_currentStrokePoints.isNotEmpty && _currentStrokeStartTime != null) {
-                  setState(() {
-                    _currentStrokes.add(
-                      Stroke(
-                        points: List.from(_currentStrokePoints),
-                        startTime: _currentStrokeStartTime!,
-                        endTime: DateTime.now(),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: primaryGreen.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.draw_outlined, color: primaryGreen, size: 20),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Draw Symbol',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: darkText,
+                        ),
                       ),
-                    );
-                    _currentStrokePoints.clear();
-                    _currentStrokeStartTime = null;
-                  });
-                }
-              },
-              child: SizedBox.expand(
-                child: RepaintBoundary(
-                  key: _canvasKey,
-                  child: CustomPaint(
-                    painter: CanvasPainter(
-                      strokes: _currentStrokes,
-                      currentStroke: _currentStrokePoints,
+                      SizedBox(height: 2),
+                      Text(
+                        'Draw your symbol in the canvas below',
+                        style: TextStyle(fontSize: 12, color: subtleText),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: primaryGreen.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '${_currentStrokes.length} stroke(s)',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: primaryGreen,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.undo, color: Colors.orange, size: 18),
+                  ),
+                  onPressed: () {
+                    if (_currentStrokes.isNotEmpty) {
+                      setState(() => _currentStrokes.removeLast());
+                    }
+                  },
+                  tooltip: 'Undo Last Stroke',
+                ),
+                IconButton(
+                  icon: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(Icons.clear, color: Colors.red.shade400, size: 18),
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _currentStrokes.clear();
+                      _currentStrokePoints.clear();
+                    });
+                  },
+                  tooltip: 'Clear Canvas',
+                ),
+              ],
+            ),
+          ),
+          // Canvas
+          Expanded(
+            child: Container(
+              margin: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                border: Border.all(color: primaryGreen.withOpacity(0.3), width: 2),
+                borderRadius: BorderRadius.circular(12),
+                color: Colors.white,
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: GestureDetector(
+                  onPanStart: (details) {
+                    setState(() {
+                      _currentStrokePoints = [details.localPosition];
+                      _currentStrokeStartTime = DateTime.now();
+                    });
+                  },
+                  onPanUpdate: (details) {
+                    setState(() => _currentStrokePoints.add(details.localPosition));
+                  },
+                  onPanEnd: (details) {
+                    if (_currentStrokePoints.isNotEmpty && _currentStrokeStartTime != null) {
+                      setState(() {
+                        _currentStrokes.add(
+                          Stroke(
+                            points: List.from(_currentStrokePoints),
+                            startTime: _currentStrokeStartTime!,
+                            endTime: DateTime.now(),
+                          ),
+                        );
+                        _currentStrokePoints.clear();
+                        _currentStrokeStartTime = null;
+                      });
+                    }
+                  },
+                  child: SizedBox.expand(
+                    child: RepaintBoundary(
+                      key: _canvasKey,
+                      child: CustomPaint(
+                        painter: CanvasPainter(
+                          strokes: _currentStrokes,
+                          currentStroke: _currentStrokePoints,
+                        ),
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              TextButton(
-                onPressed: () {
-                  setState(() {
-                    showCanvas = false;
-                    editingIndex = null;
-                    _currentStrokes.clear();
-                    _currentStrokePoints.clear();
-                  });
-                },
-                child: const Text('Cancel'),
-              ),
-              ElevatedButton(
-                onPressed: _currentStrokes.isNotEmpty ? _saveSymbol : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
+          // Action buttons
+          Container(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: () {
+                      setState(() {
+                        showCanvas = false;
+                        editingIndex = null;
+                        _currentStrokes.clear();
+                        _currentStrokePoints.clear();
+                      });
+                    },
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(color: Colors.grey.shade300),
+                      ),
+                    ),
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(
+                        color: subtleText,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
                 ),
-                child: const Text('Save Symbol'),
-              ),
-            ],
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _currentStrokes.isNotEmpty ? _saveSymbol : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: primaryGreen,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: Colors.grey.shade300,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      'Save Symbol',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
